@@ -155,7 +155,6 @@ class UnipolSaiCoordinator(DataUpdateCoordinator):
 
     async def _reverse_geocode(self, lat: float, lon: float) -> str | None:
         """Converte lat/lon in indirizzo leggibile tramite Nominatim."""
-        # Non ri-geocodifica se l'auto non si è spostata significativamente
         if (
             self._last_geocoded_lat is not None
             and abs(lat - self._last_geocoded_lat) < GEOCODE_CACHE_DISTANCE
@@ -176,25 +175,65 @@ class UnipolSaiCoordinator(DataUpdateCoordinator):
                 data = await resp.json(content_type=None)
 
             addr = data.get("address", {})
-            # Componi un indirizzo leggibile: via + numero + città
-            parts = []
-            road = addr.get("road") or addr.get("pedestrian") or addr.get("path")
-            if road:
-                parts.append(road)
+
+            # Parte 1: via/strada (urban) oppure strada/località (rurale)
+            road = (
+                addr.get("road")
+                or addr.get("pedestrian")
+                or addr.get("path")
+                or addr.get("highway")
+                or addr.get("motorway")
+                or addr.get("trunk")
+            )
             house = addr.get("house_number")
-            if house:
-                parts.append(house)
-            city = addr.get("city") or addr.get("town") or addr.get("village") or addr.get("municipality")
+
+            # Parte 2: frazione/quartiere (utile in aree rurali)
+            locality = (
+                addr.get("suburb")
+                or addr.get("quarter")
+                or addr.get("neighbourhood")
+                or addr.get("hamlet")
+                or addr.get("isolated_dwelling")
+                or addr.get("locality")
+            )
+
+            # Parte 3: comune
+            city = (
+                addr.get("city")
+                or addr.get("town")
+                or addr.get("village")
+                or addr.get("municipality")
+            )
+
+            # Parte 4: provincia abbreviata
+            province = addr.get("county") or addr.get("state_district") or addr.get("state")
+
+            # Costruisci l'indirizzo dal più al meno specifico
+            parts = []
+            if road:
+                parts.append(f"{road} {house}".strip() if house else road)
+            if locality and locality != city:
+                parts.append(locality)
             if city:
                 parts.append(city)
-            province = addr.get("county") or addr.get("state_district")
-            if province and province != city:
-                parts.append(f"({province})")
+            if province and province not in parts:
+                # Abbrevia la provincia se termina con "Provincia di ..."
+                prov_short = province.replace("Provincia di ", "").replace("Città Metropolitana di ", "")
+                parts.append(f"({prov_short})")
 
-            address = ", ".join(parts) if parts else data.get("display_name", "")
+            if parts:
+                address = ", ".join(parts)
+            else:
+                # Fallback: usa i primi 3 segmenti del display_name di Nominatim
+                # che sono tipicamente: nome_luogo, comune, provincia
+                display = data.get("display_name", "")
+                segments = [s.strip() for s in display.split(",")]
+                address = ", ".join(segments[:3]) if segments else display
+
             self._last_geocoded_lat = lat
             self._last_geocoded_lon = lon
             self.geocoded_address = address
+            _LOGGER.debug("UnipolSai: geocoding %s,%s → %s", lat, lon, address)
             return address
 
         except Exception as err:

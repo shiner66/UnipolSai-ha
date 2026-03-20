@@ -131,6 +131,9 @@ class UnipolSaiCarFinderCreditsSensor(_BaseSensor):
             "crediti_usati": self.coordinator.used_credits,
             "crediti_totali": self.coordinator.max_credits,
         }
+
+
+class UnipolSaiHeadingSensor(_BaseSensor):
     def __init__(self, coordinator, entry):
         super().__init__(coordinator, entry)
         self._attr_unique_id = f"unipolsai_{coordinator.targa}_heading"
