@@ -1,0 +1,7 @@
+{
+  "name": "UnipolSai Telematica",
+  "domains": ["device_tracker", "sensor", "button", "binary_sensor"],
+  "country": ["IT"],
+  "homeassistant": "2024.1.0",
+  "render_readme": true
+}

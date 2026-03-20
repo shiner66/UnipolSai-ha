@@ -1,0 +1,13 @@
+{
+  "domain": "unipolsai",
+  "name": "UnipolSai Telematica",
+  "version": "1.0.0",
+  "documentation": "https://github.com/shiner66/UnipolSai-ha",
+  "issue_tracker": "https://github.com/shiner66/UnipolSai-ha/issues",
+  "codeowners": ["@shiner66"],
+  "requirements": [],
+  "dependencies": [],
+  "iot_class": "cloud_polling",
+  "config_flow": true,
+  "homeassistant": "2024.1.0"
+}
