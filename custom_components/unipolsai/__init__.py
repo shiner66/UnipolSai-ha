@@ -16,9 +16,9 @@ PLATFORMS = ["device_tracker", "sensor", "button", "binary_sensor"]
 SERVICE_SET_TARGET_AREA = "set_target_area"
 SERVICE_DISABLE_TARGET_AREA = "disable_target_area"
 SERVICE_SET_SPEED_LIMIT = "set_speed_limit"
+SERVICE_SET_USAGES_PERIOD = "set_usages_period"
 
 # Il campo targa è opzionale: se omesso il servizio agisce su tutte le auto configurate.
-# Se presente, agisce solo sull'auto con quella targa.
 _TARGA_FIELD = vol.Optional("targa")
 
 SET_TARGET_AREA_SCHEMA = vol.Schema({
@@ -35,6 +35,12 @@ SET_SPEED_LIMIT_SCHEMA = vol.Schema({
 
 DISABLE_TARGET_AREA_SCHEMA = vol.Schema({
     _TARGA_FIELD: str,
+})
+
+SET_USAGES_PERIOD_SCHEMA = vol.Schema({
+    _TARGA_FIELD: str,
+    vol.Required("start_date"): cv.date,
+    vol.Required("end_date"): cv.date,
 })
 
 
@@ -119,9 +125,36 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             for coord in _get_coordinators(hass, call.data.get("targa")):
                 await coord.async_set_speed_limit(call.data["speed_limit"])
 
+        async def handle_set_usages_period(call: ServiceCall) -> None:
+            """Imposta il periodo delle statistiche di guida.
+
+            Parametri:
+              targa (opzionale): targa del veicolo. Se omessa, agisce su tutti.
+              start_date: data inizio (YYYY-MM-DD)
+              end_date: data fine (YYYY-MM-DD)
+
+            Esempio — statistiche del mese corrente:
+              service: unipolsai.set_usages_period
+              data:
+                targa: AB123CD
+                start_date: "2026-03-01"
+                end_date: "2026-03-31"
+
+            Esempio — ultima settimana:
+              service: unipolsai.set_usages_period
+              data:
+                start_date: "{{ (now() - timedelta(days=7)).strftime('%Y-%m-%d') }}"
+                end_date: "{{ now().strftime('%Y-%m-%d') }}"
+            """
+            start = call.data["start_date"].strftime("%Y-%m-%d")
+            end = call.data["end_date"].strftime("%Y-%m-%d")
+            for coord in _get_coordinators(hass, call.data.get("targa")):
+                await coord.async_set_usages_period(start, end)
+
         hass.services.async_register(DOMAIN, SERVICE_SET_TARGET_AREA, handle_set_target_area, schema=SET_TARGET_AREA_SCHEMA)
         hass.services.async_register(DOMAIN, SERVICE_DISABLE_TARGET_AREA, handle_disable_target_area, schema=DISABLE_TARGET_AREA_SCHEMA)
         hass.services.async_register(DOMAIN, SERVICE_SET_SPEED_LIMIT, handle_set_speed_limit, schema=SET_SPEED_LIMIT_SCHEMA)
+        hass.services.async_register(DOMAIN, SERVICE_SET_USAGES_PERIOD, handle_set_usages_period, schema=SET_USAGES_PERIOD_SCHEMA)
 
     return True
 
@@ -139,5 +172,6 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass.services.async_remove(DOMAIN, SERVICE_SET_TARGET_AREA)
         hass.services.async_remove(DOMAIN, SERVICE_DISABLE_TARGET_AREA)
         hass.services.async_remove(DOMAIN, SERVICE_SET_SPEED_LIMIT)
+        hass.services.async_remove(DOMAIN, SERVICE_SET_USAGES_PERIOD)
 
     return unload_ok

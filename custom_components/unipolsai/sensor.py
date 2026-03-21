@@ -338,6 +338,7 @@ class UnipolSaiNextRataSensor(_ContractBaseSensor):
 
 # ==============================================================
 # Statistiche utilizzo veicolo (vehicleUsages, dateRange=g)
+# I dati coprono il periodo dall'inizio del contratto ad oggi.
 # Distanze in metri → convertiamo in km
 # Tempi in secondi → convertiamo in ore
 # ==============================================================
@@ -355,26 +356,35 @@ class _UsageSensor(_BaseSensor):
 
     @staticmethod
     def _m_to_km(meters) -> float | None:
-        """Converti metri in km con 1 decimale."""
         if meters is None:
             return None
         return round(meters / 1000, 1)
 
     @staticmethod
     def _s_to_h(seconds) -> float | None:
-        """Converti secondi in ore con 1 decimale."""
         if seconds is None:
             return None
         return round(seconds / 3600, 1)
 
+    def _period_attrs(self) -> dict:
+        """Attributi comuni sul periodo di riferimento."""
+        vu = self._vu
+        from_ts = vu.get("fromDate")
+        to_ts = vu.get("statisticsDate") or vu.get("toDate")
+        return {
+            "periodo_dal": datetime.fromtimestamp(from_ts / 1000).strftime("%d/%m/%Y") if from_ts else None,
+            "periodo_al": datetime.fromtimestamp(to_ts / 1000).strftime("%d/%m/%Y") if to_ts else None,
+            "giorni_analizzati": vu.get("totalDaysUsedForAnalysis"),
+        }
+
 
 class UnipolSaiTotalDistanceSensor(_UsageSensor):
-    """Distanza totale percorsa nel periodo contrattuale."""
+    """Km percorsi dall'inizio del contratto ad oggi."""
 
     def __init__(self, coordinator, entry):
         super().__init__(coordinator, entry)
         self._attr_unique_id = f"unipolsai_{coordinator.targa}_total_distance"
-        self._attr_name = f"Distanza totale {coordinator.targa}"
+        self._attr_name = f"Km percorsi {coordinator.targa}"
         self._attr_icon = "mdi:map-marker-distance"
         self._attr_native_unit_of_measurement = "km"
 
@@ -385,13 +395,8 @@ class UnipolSaiTotalDistanceSensor(_UsageSensor):
     @property
     def extra_state_attributes(self) -> dict:
         vu = self._vu
-        from datetime import datetime
-        from_ts = vu.get("fromDate")
-        to_ts = vu.get("statisticsDate")
         return {
-            "dal": datetime.fromtimestamp(from_ts / 1000).strftime("%d/%m/%Y") if from_ts else None,
-            "al": datetime.fromtimestamp(to_ts / 1000).strftime("%d/%m/%Y") if to_ts else None,
-            "giorni_analizzati": vu.get("totalDaysUsedForAnalysis"),
+            **self._period_attrs(),
             "provincia_principale": vu.get("higherMileageProvinceFullName"),
             "lun_km": self._m_to_km(vu.get("mondayDrivingDistance")),
             "mar_km": self._m_to_km(vu.get("tuesdayDrivingDistance")),
@@ -404,12 +409,12 @@ class UnipolSaiTotalDistanceSensor(_UsageSensor):
 
 
 class UnipolSaiTotalDrivingTimeSensor(_UsageSensor):
-    """Tempo di guida totale nel periodo contrattuale (ore)."""
+    """Ore di guida dall'inizio del contratto ad oggi."""
 
     def __init__(self, coordinator, entry):
         super().__init__(coordinator, entry)
         self._attr_unique_id = f"unipolsai_{coordinator.targa}_total_driving_time"
-        self._attr_name = f"Tempo di guida totale {coordinator.targa}"
+        self._attr_name = f"Ore di guida {coordinator.targa}"
         self._attr_icon = "mdi:steering"
         self._attr_native_unit_of_measurement = UnitOfTime.HOURS
 
@@ -421,6 +426,7 @@ class UnipolSaiTotalDrivingTimeSensor(_UsageSensor):
     def extra_state_attributes(self) -> dict:
         vu = self._vu
         return {
+            **self._period_attrs(),
             "ore_diurne": self._s_to_h(vu.get("daylightDrivingTime")),
             "ore_notturne": self._s_to_h(
                 (vu.get("totalDrivingTime") or 0) - (vu.get("daylightDrivingTime") or 0)
@@ -439,7 +445,7 @@ class UnipolSaiTotalDrivingTimeSensor(_UsageSensor):
 
 
 class UnipolSaiCityDistanceSensor(_UsageSensor):
-    """Distanza percorsa in città."""
+    """Km in città dall'inizio del contratto ad oggi."""
 
     def __init__(self, coordinator, entry):
         super().__init__(coordinator, entry)
@@ -452,9 +458,13 @@ class UnipolSaiCityDistanceSensor(_UsageSensor):
     def native_value(self) -> float | None:
         return self._m_to_km(self._vu.get("cityDrivingDistance"))
 
+    @property
+    def extra_state_attributes(self) -> dict:
+        return self._period_attrs()
+
 
 class UnipolSaiExtraUrbanDistanceSensor(_UsageSensor):
-    """Distanza percorsa in extraurbano."""
+    """Km extraurbano dall'inizio del contratto ad oggi."""
 
     def __init__(self, coordinator, entry):
         super().__init__(coordinator, entry)
@@ -467,9 +477,13 @@ class UnipolSaiExtraUrbanDistanceSensor(_UsageSensor):
     def native_value(self) -> float | None:
         return self._m_to_km(self._vu.get("extraUrbanDrivingDistance"))
 
+    @property
+    def extra_state_attributes(self) -> dict:
+        return self._period_attrs()
+
 
 class UnipolSaiHighwayDistanceSensor(_UsageSensor):
-    """Distanza percorsa in autostrada."""
+    """Km autostrada dall'inizio del contratto ad oggi."""
 
     def __init__(self, coordinator, entry):
         super().__init__(coordinator, entry)
@@ -482,9 +496,13 @@ class UnipolSaiHighwayDistanceSensor(_UsageSensor):
     def native_value(self) -> float | None:
         return self._m_to_km(self._vu.get("highwayDrivingDistance"))
 
+    @property
+    def extra_state_attributes(self) -> dict:
+        return self._period_attrs()
+
 
 class UnipolSaiNightDrivingDistanceSensor(_UsageSensor):
-    """Distanza percorsa di notte (totalDistance - daylightDrivingDistance)."""
+    """Km notturni dall'inizio del contratto ad oggi."""
 
     def __init__(self, coordinator, entry):
         super().__init__(coordinator, entry)
@@ -501,3 +519,7 @@ class UnipolSaiNightDrivingDistanceSensor(_UsageSensor):
         if total is None or daylight is None:
             return None
         return self._m_to_km(total - daylight)
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        return self._period_attrs()

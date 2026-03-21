@@ -75,6 +75,7 @@ class UnipolSaiCoordinator(DataUpdateCoordinator):
         # Contratto (chiave scoperta automaticamente, aggiornata ogni ora)
         self.contract_data: dict | None = None
         self._chiave_contratto: str | None = None
+        self._contract_extra_params: dict = {}
         self._contract_last_fetch: float = 0.0
 
         # Statistiche uso
@@ -473,46 +474,111 @@ class UnipolSaiCoordinator(DataUpdateCoordinator):
 
         session = await self._get_session()
 
+        # ------------------------------------------------------------------
+        # Step 1: GET /contesto-utente/v2/me/polizze
+        # Chiamato dall'app all'avvio — restituisce le polizze con
+        # chiaveContratto e i campi per costruire il body del passo 2.
+        # ------------------------------------------------------------------
         if not self._chiave_contratto:
+            polizze_url = f"{BASE_URL}/hub/api/priv/contesto-utente/v2/me/polizze"
             try:
-                async with session.get(CONTRATTI_TELEMATICI_URL, headers=self._auth_headers()) as resp:
+                async with session.get(polizze_url, headers=self._auth_headers()) as resp:
                     if resp.status != 200:
+                        _LOGGER.warning("UnipolSai contratto: /me/polizze HTTP %d", resp.status)
                         return None
-                    result = await resp.json(content_type=None)
-                contratti = result.get("auto", {}).get("contrattiAuto", [])
-                if not contratti:
+                    data = await resp.json(content_type=None)
+
+                polizze = data.get("polizze", []) if isinstance(data, dict) else data
+                polizza_raw = None
+                for p in polizze:
+                    targa_p = (p.get("targaVeicolo") or "").replace(" ", "").upper()
+                    if targa_p == self.targa and p.get("chiaveContratto"):
+                        polizza_raw = p
+                        self._chiave_contratto = str(p["chiaveContratto"])
+                        break
+
+                if not polizza_raw:
+                    _LOGGER.warning("UnipolSai contratto: targa %s non trovata in /me/polizze", self.targa)
                     return None
 
-                polizze_url = f"{BASE_URL}/hub/api/priv/contratti/v2/me/polizze"
-                for params in [{"targa": self.targa}, {}]:
-                    async with session.get(polizze_url, headers=self._auth_headers(), params=params) as resp2:
+                # ----------------------------------------------------------
+                # Step 2: POST /contratti/v2/polizze/titolo/recuperoTitoli
+                # Restituisce timbroEffettivoPagamento e altri campi necessari
+                # per la chiamata di dettaglio.
+                # ----------------------------------------------------------
+                from datetime import datetime as _dt
+                scadenza_ts = polizza_raw.get("dataScadenza")
+                scadenza_str = _dt.fromtimestamp(scadenza_ts / 1000).strftime("%Y-%m-%d") if scadenza_ts else ""
+
+                recupero_url = f"{BASE_URL}/hub/api/priv/contratti/v2/polizze/titolo/recuperoTitoli"
+                recupero_body = {
+                    "ListaPolizza": [{
+                        "IdPolizza": polizza_raw.get("polizza", ""),
+                        "Compagnia": polizza_raw.get("exdivisione", "1"),
+                        "AgenziaMadre": polizza_raw.get("agenzia", ""),
+                        "AgenziaFiglia": polizza_raw.get("agenzia", ""),
+                        "RamoPolizza": polizza_raw.get("ramo", "030"),
+                        "DataScadenzaPolizza": scadenza_str,
+                        "Targa": self.targa,
+                    }],
+                    "ListaFolder": [],
+                }
+
+                timbro = ""
+                try:
+                    async with session.post(
+                        recupero_url,
+                        headers={**self._auth_headers(), "Content-Type": "application/json"},
+                        json=recupero_body,
+                    ) as resp2:
                         if resp2.status == 200:
-                            pol = await resp2.json(content_type=None)
-                            for p in pol.get("polizze", []) or []:
-                                targa_p = (p.get("targaVeicolo") or "").replace(" ", "").upper()
-                                if targa_p == self.targa or (not targa_p and str(p.get("comparto", "")) in ("1001", "1000")):
-                                    chiave = p.get("chiaveContratto")
-                                    if chiave:
-                                        self._chiave_contratto = chiave
-                                        break
-                    if self._chiave_contratto:
-                        break
+                            r2data = await resp2.json(content_type=None)
+                            titoli = r2data.get("listaPolizza", [])
+                            if titoli:
+                                timbro = titoli[0].get("timbroEffettivoPagamento", "") or ""
+                        else:
+                            _LOGGER.debug("UnipolSai contratto: recuperoTitoli HTTP %d", resp2.status)
+                except Exception as err:
+                    _LOGGER.debug("UnipolSai contratto: recuperoTitoli errore: %s", err)
+
+                self._contract_extra_params = {
+                    "polizzaNum": polizza_raw.get("polizza", ""),
+                    "dataScadenzaPolizza": scadenza_str,
+                    "timbroEffettivoPagamento": timbro,
+                    "ruoloContraente": str(polizza_raw.get("ruoloContraente", "1001")),
+                    "comparto": str(polizza_raw.get("comparto", "1001")),
+                }
+                _LOGGER.info(
+                    "UnipolSai contratto: chiave=%s polizza=%s scadenza=%s",
+                    self._chiave_contratto,
+                    polizza_raw.get("polizza"),
+                    scadenza_str,
+                )
+
             except Exception as err:
-                _LOGGER.error("UnipolSai: errore recupero chiave contratto: %s", err)
+                _LOGGER.warning("UnipolSai contratto: errore discovery: %s", err)
                 return None
 
         if not self._chiave_contratto:
+            _LOGGER.warning("UnipolSai contratto: chiaveContratto non trovata per targa %s", self.targa)
             return None
 
+        # ------------------------------------------------------------------
+        # Step 3: GET /contratti/v4/polizze/{chiave} — dettaglio contratto
+        # ------------------------------------------------------------------
         url = CONTRACT_URL.format(chiave_contratto=self._chiave_contratto)
+        extra = self._contract_extra_params
         params = {
             "chiaveContratto": self._chiave_contratto,
             "sistemaContratto": "CRM",
-            "ruoloContraente": "1001",
-            "comparto": "1001",
-            "targa": self.targa,
+            "ruoloContraente": extra.get("ruoloContraente", "1001"),
+            "comparto": extra.get("comparto", "1001"),
+            "dataScadenzaPolizza": extra.get("dataScadenzaPolizza", ""),
+            "timbroEffettivoPagamento": extra.get("timbroEffettivoPagamento", ""),
+            "polizzaNum": extra.get("polizzaNum", ""),
             "statoTitolo": "A",
             "btnProseguiOnline": "false",
+            "targa": self.targa,
         }
         try:
             async with session.get(url, headers=self._auth_headers(), params=params) as resp:
@@ -521,13 +587,17 @@ class UnipolSaiCoordinator(DataUpdateCoordinator):
                     async with session.get(url, headers=self._auth_headers(), params=params) as r2:
                         result = await r2.json(content_type=None)
                 elif resp.status != 200:
+                    _LOGGER.warning(
+                        "UnipolSai contratto: dettaglio HTTP %d chiave=%s",
+                        resp.status, self._chiave_contratto,
+                    )
                     return None
                 else:
                     result = await resp.json(content_type=None)
             self._contract_last_fetch = time.monotonic()
             return self._parse_contract(result)
         except Exception as err:
-            _LOGGER.error("UnipolSai: errore fetch contratto: %s", err)
+            _LOGGER.error("UnipolSai contratto: errore fetch dettaglio: %s", err)
             return None
 
     def _parse_contract(self, raw: dict) -> dict:
@@ -564,17 +634,30 @@ class UnipolSaiCoordinator(DataUpdateCoordinator):
         }
 
     # ------------------------------------------------------------------
-    # Vehicle Usages
+    # Vehicle Usages con periodo selezionabile
     # ------------------------------------------------------------------
 
-    async def _fetch_vehicle_usages(self) -> dict | None:
+    async def _fetch_vehicle_usages(
+        self,
+        start_date: int | None = None,
+        end_date: int | None = None,
+    ) -> dict | None:
+        """Recupera le statistiche di utilizzo.
+        
+        Se start_date/end_date sono None usa dateRange=g (inizio contratto → oggi).
+        Altrimenti usa dateRange=t con le date specificate (timestamp Unix ms).
+        """
         session = await self._get_session()
         url = VEHICLE_USAGES_URL.format(targa=self.targa)
+        if start_date and end_date:
+            params = {"dateRange": "t", "startDate": start_date, "endDate": end_date}
+        else:
+            params = {"dateRange": "g"}
         try:
-            async with session.get(url, headers=self._auth_headers(), params={"dateRange": "g"}) as resp:
+            async with session.get(url, headers=self._auth_headers(), params=params) as resp:
                 if resp.status == 401:
                     self._token = await self._login()
-                    async with session.get(url, headers=self._auth_headers(), params={"dateRange": "g"}) as r2:
+                    async with session.get(url, headers=self._auth_headers(), params=params) as r2:
                         result = await r2.json(content_type=None)
                 elif resp.status != 200:
                     return None
@@ -587,6 +670,33 @@ class UnipolSaiCoordinator(DataUpdateCoordinator):
         except Exception as err:
             _LOGGER.error("UnipolSai: errore vehicleUsages: %s", err)
             return None
+
+    async def async_set_usages_period(
+        self, start_date: str, end_date: str
+    ) -> bool:
+        """Imposta il periodo delle statistiche (formato YYYY-MM-DD).
+        
+        Aggiorna i sensori vehicleUsages per il periodo specificato.
+        """
+        await self._ensure_token()
+        try:
+            from datetime import datetime as _dt
+            start_ts = int(_dt.strptime(start_date, "%Y-%m-%d").timestamp() * 1000)
+            end_ts = int(_dt.strptime(end_date, "%Y-%m-%d").timestamp() * 1000)
+        except ValueError as err:
+            _LOGGER.error("UnipolSai: formato data non valido: %s", err)
+            return False
+
+        usages = await self._fetch_vehicle_usages(start_date=start_ts, end_date=end_ts)
+        if usages is not None:
+            self.vehicle_usages = usages
+            self.async_update_listeners()
+            _LOGGER.info(
+                "UnipolSai: statistiche aggiornate per il periodo %s → %s",
+                start_date, end_date,
+            )
+            return True
+        return False
 
     # ------------------------------------------------------------------
     # GPS live update (button)
@@ -645,7 +755,7 @@ class UnipolSaiCoordinator(DataUpdateCoordinator):
                 self._fetch_target_area(),
                 self._fetch_speed_limit(),
                 self._fetch_contract_data(),
-                self._fetch_vehicle_usages(),
+                self._fetch_vehicle_usages(),  # default: inizio contratto → oggi
                 self._check_car_moved_notifications(),
                 self._check_target_area_notifications(),
                 self._check_speed_limit_notifications(),
