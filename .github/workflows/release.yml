@@ -1,0 +1,68 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  release:
+    name: Publish stable release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Read version from manifest.json
+        id: version
+        run: |
+          VERSION=$(jq -r '.version' custom_components/unipolsai/manifest.json)
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Check if release already exists
+        id: check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          if gh release view "v${VERSION}" &>/dev/null; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "Release v${VERSION} già esistente — skip."
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "Release v${VERSION} non ancora pubblicata — procedo."
+          fi
+
+      - name: Extract CHANGELOG notes
+        id: notes
+        if: steps.check.outputs.exists == 'false'
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          # Estrae il blocco del CHANGELOG per questa versione
+          NOTES=$(awk "/^## \[${VERSION}\]/{found=1; next} found && /^## \[/{exit} found{print}" CHANGELOG.md)
+          if [ -z "$NOTES" ]; then
+            NOTES="_Nessuna nota di rilascio trovata nel CHANGELOG per v${VERSION}._"
+          fi
+          # Salva in un file per evitare problemi di escape nei multiline
+          echo "$NOTES" > /tmp/release_notes.md
+          echo "Estratte $(echo "$NOTES" | wc -l) righe di note."
+
+      - name: Create stable release
+        if: steps.check.outputs.exists == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ steps.version.outputs.tag }}"
+          VERSION="${{ steps.version.outputs.version }}"
+          COMMIT="${{ github.sha }}"
+          SHORT="${COMMIT:0:7}"
+
+          gh release create "$TAG" \
+            --title "v${VERSION}" \
+            --notes-file /tmp/release_notes.md \
+            --target main \
+            --latest
