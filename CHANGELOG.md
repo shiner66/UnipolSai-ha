@@ -26,8 +26,10 @@ e il versioning segue [Semantic Versioning](https://semver.org/lang/it/).
   - Click sull'intestazione del veicolo → centra la mappa e apre il popup.
   - Configurazione minima: `type: custom:unipolsai-vehicle-card` (zero config).
   - Parametri opzionali: `targa`, `zoom` (default 15), `height` (default 300 px).
-- **Percorso statico** auto-registrato: la card JS è servita dall'integrazione
-  su `/{DOMAIN}/unipolsai-vehicle-card.js` senza installazione manuale dei file.
+- **Auto-inject nel frontend**: la card è parte dell'integrazione e viene
+  caricata automaticamente da HA via `frontend.add_extra_js_url`. Nessuna
+  risorsa Lovelace da aggiungere manualmente — basta riavviare HA e fare
+  hard refresh del browser.
 
 ### Modificato
 - `__init__.py`: aggiunto `async_setup` per registrare il percorso statico HTTP

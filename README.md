@@ -69,20 +69,11 @@ L'integrazione include una **scheda Lovelace personalizzata** che mostra in un'u
 - 🔄 **Pulsante "Aggiorna posizione GPS"** integrato nella card
 - Supporto **più veicoli** sullo stesso dashboard
 
-### Aggiungere la risorsa Lovelace
+### Installazione della card
 
-Dopo aver installato (o aggiornato) l'integrazione, aggiungi la card come risorsa:
+La card è **parte dell'integrazione** e si attiva automaticamente al riavvio di Home Assistant dopo l'installazione. Non è necessario aggiungere risorse manualmente né scaricare file separati.
 
-1. Vai su **Impostazioni → Dashboard → ⋮ → Risorse**
-2. Clicca **Aggiungi risorsa**
-3. Inserisci l'URL:
-   ```
-   /unipolsai/unipolsai-vehicle-card.js
-   ```
-4. Tipo: **Modulo JavaScript**
-5. Salva e **ricarica la pagina** (hard refresh: Ctrl+Shift+R)
-
-> Il file JS è servito automaticamente dall'integrazione — non è necessario copiare nulla nella cartella `www`.
+Dopo il riavvio, esegui un **hard refresh** del browser (Ctrl+Shift+R) per caricare il nuovo modulo JS.
 
 ### Configurazione YAML della card
 

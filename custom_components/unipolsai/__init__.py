@@ -19,9 +19,11 @@ _CARD_PATH = Path(__file__).parent / "www" / "unipolsai-vehicle-card.js"
 
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
-    """Registra il percorso statico per la Lovelace card."""
+    """Registra il percorso statico e inietta la Lovelace card nel frontend."""
     try:
         from homeassistant.components.http import StaticPathConfig
+        from homeassistant.components import frontend
+
         await hass.http.async_register_static_paths([
             StaticPathConfig(
                 url_path=_CARD_URL,
@@ -29,9 +31,12 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
                 cache_headers=False,
             )
         ])
-        _LOGGER.debug("UnipolSai: card JS registrata su %s", _CARD_URL)
+        # Inietta la card come modulo ES nel frontend: nessuna configurazione
+        # manuale richiesta dall'utente (niente "Risorse" da aggiungere).
+        frontend.add_extra_js_url(hass, _CARD_URL)
+        _LOGGER.debug("UnipolSai: vehicle card iniettata nel frontend su %s", _CARD_URL)
     except Exception as err:  # noqa: BLE001
-        _LOGGER.warning("UnipolSai: impossibile registrare la card JS: %s", err)
+        _LOGGER.warning("UnipolSai: impossibile registrare la vehicle card: %s", err)
     return True
 
 SERVICE_SET_TARGET_AREA = "set_target_area"
