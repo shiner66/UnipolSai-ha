@@ -2,6 +2,7 @@
 
 [![HACS Custom](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/hacs/integration)
 [![GitHub Release](https://img.shields.io/github/release/shiner66/UnipolSai-ha.svg)](https://github.com/shiner66/UnipolSai-ha/releases)
+[![Changelog](https://img.shields.io/badge/Changelog-CHANGELOG.md-blue.svg)](CHANGELOG.md)
 
 Integrazione non ufficiale per Home Assistant che espone i dati della scatola nera **UnipolSai Unibox** come entità native.
 
@@ -54,6 +55,72 @@ Integrazione non ufficiale per Home Assistant che espone i dati della scatola ne
 | `sensor.scadenza_polizza` | Data scadenza polizza |
 | `sensor.premio_annuo_lordo` | Premio annuo + dettaglio per garanzia |
 | `sensor.prossima_rata` | Data prossima rata |
+
+---
+
+## Lovelace Card — Mappa veicoli
+
+L'integrazione include una **scheda Lovelace personalizzata** che mostra in un'unica vista:
+
+- 🗺️ **Mappa interattiva** (OpenStreetMap) con il marker del veicolo
+- 🔋 **Crediti Car Finder rimanenti** oggi (es. `3/5 crediti`)
+- 🕐 **Timestamp ultimo aggiornamento GPS**
+- 🚗 **Velocità istantanea**
+- 🔄 **Pulsante "Aggiorna posizione GPS"** integrato nella card
+- Supporto **più veicoli** sullo stesso dashboard
+
+### Aggiungere la risorsa Lovelace
+
+Dopo aver installato (o aggiornato) l'integrazione, aggiungi la card come risorsa:
+
+1. Vai su **Impostazioni → Dashboard → ⋮ → Risorse**
+2. Clicca **Aggiungi risorsa**
+3. Inserisci l'URL:
+   ```
+   /unipolsai/unipolsai-vehicle-card.js
+   ```
+4. Tipo: **Modulo JavaScript**
+5. Salva e **ricarica la pagina** (hard refresh: Ctrl+Shift+R)
+
+> Il file JS è servito automaticamente dall'integrazione — non è necessario copiare nulla nella cartella `www`.
+
+### Configurazione YAML della card
+
+**Configurazione minima** (auto-rileva tutti i veicoli UnipolSai):
+
+```yaml
+type: custom:unipolsai-vehicle-card
+```
+
+**Singolo veicolo** (consigliato se hai più auto e vuoi card separate):
+
+```yaml
+type: custom:unipolsai-vehicle-card
+targa: AB123CD
+```
+
+**Personalizzazione avanzata**:
+
+```yaml
+type: custom:unipolsai-vehicle-card
+targa: AB123CD
+zoom: 15        # livello di zoom iniziale (default: 15)
+height: 350     # altezza mappa in pixel (default: 300)
+```
+
+### Come funziona la card
+
+| Elemento | Descrizione |
+|----------|-------------|
+| **Marker verde** | Veicolo fermo |
+| **Marker blu** | Veicolo in movimento |
+| **Marker arancione** | Aggiornamento GPS live in corso |
+| **Chip crediti giallo** | 1 credito rimanente — attenzione |
+| **Chip crediti rosso** | Crediti esauriti — pulsante disabilitato |
+| **Click sull'intestazione** | Centra la mappa sul veicolo |
+| **Pulsante Aggiorna** | Invia richiesta fix GPS live (consuma 1 credito) |
+
+> **Nota:** La mappa richiede connessione internet per caricare le tiles OpenStreetMap e la libreria Leaflet dal CDN. In reti isolate potrebbe non essere disponibile.
 
 ---
 
@@ -188,6 +255,12 @@ automation:
 - I **dati contratto** vengono aggiornati ogni ora, indipendentemente dall'intervallo di polling GPS
 - La **geocodifica inversa** usa Nominatim (OpenStreetMap) gratuitamente, senza API key
 - Gli **header dell'app** (`x-ibm-client-id`, ecc.) sono credenziali dell'applicazione mobile pubblica UnipolSai, non credenziali personali
+
+---
+
+## Changelog
+
+Vedi [CHANGELOG.md](CHANGELOG.md) per la storia completa delle versioni.
 
 ---
 

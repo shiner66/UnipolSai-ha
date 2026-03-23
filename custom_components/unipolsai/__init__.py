@@ -1,5 +1,6 @@
 """Integrazione UnipolSai per Home Assistant."""
 import logging
+from pathlib import Path
 import voluptuous as vol
 
 from homeassistant.config_entries import ConfigEntry
@@ -12,6 +13,26 @@ from .coordinator import UnipolSaiCoordinator
 _LOGGER = logging.getLogger(__name__)
 
 PLATFORMS = ["device_tracker", "sensor", "button", "binary_sensor"]
+
+_CARD_URL = f"/{DOMAIN}/unipolsai-vehicle-card.js"
+_CARD_PATH = Path(__file__).parent / "www" / "unipolsai-vehicle-card.js"
+
+
+async def async_setup(hass: HomeAssistant, config: dict) -> bool:
+    """Registra il percorso statico per la Lovelace card."""
+    try:
+        from homeassistant.components.http import StaticPathConfig
+        await hass.http.async_register_static_paths([
+            StaticPathConfig(
+                url_path=_CARD_URL,
+                path=_CARD_PATH,
+                cache_headers=False,
+            )
+        ])
+        _LOGGER.debug("UnipolSai: card JS registrata su %s", _CARD_URL)
+    except Exception as err:  # noqa: BLE001
+        _LOGGER.warning("UnipolSai: impossibile registrare la card JS: %s", err)
+    return True
 
 SERVICE_SET_TARGET_AREA = "set_target_area"
 SERVICE_DISABLE_TARGET_AREA = "disable_target_area"
