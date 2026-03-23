@@ -62,42 +62,71 @@ Integrazione non ufficiale per Home Assistant che espone i dati della scatola ne
 
 L'integrazione include una **scheda Lovelace personalizzata** che mostra in un'unica vista:
 
-- 🗺️ **Mappa interattiva** (OpenStreetMap) con il marker del veicolo
+- 🗺️ **Mappa interattiva** (CartoDB Voyager) con marker per ogni veicolo
+- 🏷️ **Nome personalizzato** per ciascun veicolo (opzionale)
 - 🔋 **Crediti Car Finder rimanenti** oggi (es. `3/5 crediti`)
 - 🕐 **Timestamp ultimo aggiornamento GPS**
 - 🚗 **Velocità istantanea**
-- 🔄 **Pulsante "Aggiorna posizione GPS"** integrato nella card
-- Supporto **più veicoli** sullo stesso dashboard
+- 🔄 **Pulsante "Aggiorna posizione GPS"** integrato per ogni veicolo
+- Supporto **più veicoli** sullo stesso pannello
 
 ### Installazione della card
 
 La card è **parte dell'integrazione** e si attiva automaticamente al riavvio di Home Assistant dopo l'installazione. Non è necessario aggiungere risorse manualmente né scaricare file separati.
 
-Dopo il riavvio, esegui un **hard refresh** del browser (Ctrl+Shift+R) per caricare il nuovo modulo JS.
+Dopo il riavvio, esegui un **hard refresh** del browser (Ctrl+Shift+R su desktop, oppure svuota la cache su iOS Safari) per caricare il nuovo modulo JS.
 
 ### Configurazione YAML della card
 
-**Configurazione minima** (auto-rileva tutti i veicoli UnipolSai):
+#### Auto-discovery — rileva tutti i veicoli UnipolSai automaticamente
+Lascia la configurazione vuota: la card trova e mostra tutti i veicoli registrati nell'integrazione.
 
 ```yaml
 type: custom:unipolsai-vehicle-card
 ```
 
-**Singolo veicolo** (consigliato se hai più auto e vuoi card separate):
-
-```yaml
-type: custom:unipolsai-vehicle-card
-targa: AB123CD
-```
-
-**Personalizzazione avanzata**:
-
+#### Singolo veicolo (backward-compat)
 ```yaml
 type: custom:unipolsai-vehicle-card
 targa: AB123CD
-zoom: 15        # livello di zoom iniziale (default: 15)
-height: 350     # altezza mappa in pixel (default: 300)
 ```
+
+#### Lista veicoli con nome personalizzato
+Il modo consigliato quando hai più veicoli: puoi assegnare un nome leggibile a ciascuno e controllare l'ordine di visualizzazione dei pannelli.
+
+```yaml
+type: custom:unipolsai-vehicle-card
+vehicles:
+  - targa: AB123CD
+    name: Auto di Mario
+  - targa: GG687PM
+    name: Auto di Lucia
+```
+
+#### Tutte le opzioni disponibili
+```yaml
+type: custom:unipolsai-vehicle-card
+vehicles:
+  - targa: AB123CD
+    name: Auto di Mario    # opzionale — se omesso mostra solo la targa
+  - targa: GG687PM
+    name: Auto di Lucia
+zoom: 15                   # livello di zoom iniziale della mappa (default: 15)
+height: 350                # altezza della mappa in pixel (default: 300)
+```
+
+### Parametri di configurazione
+
+| Parametro | Tipo | Default | Descrizione |
+|-----------|------|---------|-------------|
+| `vehicles` | lista | — | Lista di veicoli da mostrare (formato consigliato) |
+| `vehicles[].targa` | stringa | — | Targa del veicolo (es. `AB123CD`) |
+| `vehicles[].name` | stringa | — | Nome leggibile del veicolo (opzionale) |
+| `targa` | stringa | — | Singola targa — backward compat, equivale a `vehicles` con un elemento senza nome |
+| `zoom` | intero | `15` | Livello di zoom iniziale della mappa (1–20) |
+| `height` | intero | `300` | Altezza della mappa in pixel |
+
+> **Priorità config:** `vehicles` > `targa` singola > auto-discovery (se nessuno dei due è impostato)
 
 ### Come funziona la card
 
@@ -106,12 +135,15 @@ height: 350     # altezza mappa in pixel (default: 300)
 | **Marker verde** | Veicolo fermo |
 | **Marker blu** | Veicolo in movimento |
 | **Marker arancione** | Aggiornamento GPS live in corso |
-| **Chip crediti giallo** | 1 credito rimanente — attenzione |
-| **Chip crediti rosso** | Crediti esauriti — pulsante disabilitato |
-| **Click sull'intestazione** | Centra la mappa sul veicolo |
+| **Nome veicolo** (se configurato) | Mostrato in grassetto nell'intestazione del pannello e nel popup della mappa |
+| **Badge targa** | Sempre visibile nel pannello, affianca il nome se presente |
+| **Chip crediti arancione** | 1 credito rimanente — attenzione |
+| **Chip crediti rosso** | Crediti esauriti — il pulsante di aggiornamento è disabilitato |
+| **Click sull'intestazione** | Centra la mappa sul veicolo e apre il popup |
 | **Pulsante Aggiorna** | Invia richiesta fix GPS live (consuma 1 credito) |
+| **Chip "Aggiornamento GPS…"** | Animato, visibile mentre il fix è in elaborazione |
 
-> **Nota:** La mappa richiede connessione internet per caricare le tiles OpenStreetMap e la libreria Leaflet dal CDN. In reti isolate potrebbe non essere disponibile.
+> **Nota:** La mappa richiede connessione internet per caricare le tiles CartoDB Voyager. In reti isolate la mappa potrebbe non essere disponibile.
 
 ---
 
@@ -131,9 +163,6 @@ height: 350     # altezza mappa in pixel (default: 300)
 2. Riavvia Home Assistant
 3. Vai su **Impostazioni → Dispositivi e Servizi → Aggiungi integrazione**
 4. Cerca "UnipolSai" e segui la configurazione
-
-### HACS (se disponibile nel registry)
-Aggiungi questo repository come custom repository in HACS, categoria "Integration".
 
 ---
 
@@ -245,6 +274,7 @@ automation:
 - I **crediti Car Finder** (max 5/giorno) vengono usati solo dal pulsante "Aggiorna posizione GPS". Il polling normale usa `update=false` e non li consuma
 - I **dati contratto** vengono aggiornati ogni ora, indipendentemente dall'intervallo di polling GPS
 - La **geocodifica inversa** usa Nominatim (OpenStreetMap) gratuitamente, senza API key
+- La **mappa** usa le tiles CartoDB Voyager; la libreria Leaflet 1.9.4 è bundled nel JS, nessun CDN richiesto
 - Gli **header dell'app** (`x-ibm-client-id`, ecc.) sono credenziali dell'applicazione mobile pubblica UnipolSai, non credenziali personali
 
 ---
