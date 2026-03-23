@@ -6,6 +6,30 @@ e il versioning segue [Semantic Versioning](https://semver.org/lang/it/).
 
 ---
 
+## [1.5.0] — 2026-03-23
+
+### Aggiunto
+- **Lovelace card**: supporto lista veicoli con nome tramite il nuovo parametro
+  `vehicles` (array di `{targa, name}`). Backward-compat: `targa` singola e
+  auto-discovery continuano a funzionare invariati.
+- **Nomi veicoli** mostrati in grassetto nell'intestazione del pannello e nel
+  popup della mappa. La targa diventa badge secondario affiancato al nome.
+- **Tile layer CartoDB Voyager** al posto di OpenStreetMap standard: mappa più
+  moderna e leggera.
+- **Angoli arrotondati** sul contenitore della mappa (`border-radius: 12px`).
+- **Popup Leaflet moderno**: shadow, niente bordo brutto, tipografia pulita.
+
+### Modificato
+- `manifest.json`, `__init__.py`, JS: versione bump `1.4.0` → `1.5.0`.
+- `__init__.py`: `_VERSION` allineato al JS — cambia l'URL del resource statico,
+  forza il browser a ricaricare il file JS aggiornato invece di usare la cache.
+- `services.yaml`: `step: 0.000001` → `step: any` per latitudine/longitudine
+  (fix warning HA su versioni recenti).
+- `README.md`: documentata la configurazione `vehicles`, tabella parametri
+  completa, aggiornati riferimenti al tile layer CartoDB.
+
+---
+
 ## [1.4.0] — 2026-03-23
 
 ### Aggiunto
