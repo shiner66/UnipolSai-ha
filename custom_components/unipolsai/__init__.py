@@ -3,6 +3,8 @@ import logging
 from pathlib import Path
 import voluptuous as vol
 
+from homeassistant.components.frontend import add_extra_js_url
+from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.helpers import config_validation as cv
@@ -14,58 +16,18 @@ _LOGGER = logging.getLogger(__name__)
 
 PLATFORMS = ["device_tracker", "sensor", "button", "binary_sensor"]
 
-_CARD_URL = f"/{DOMAIN}/unipolsai-vehicle-card.js"
+_VERSION = "1.4.0"
+_CARD_URL = f"/{DOMAIN}/{_VERSION}/unipolsai-vehicle-card.js"
 _CARD_PATH = Path(__file__).parent / "frontend" / "unipolsai-vehicle-card.js"
-
-
-async def _async_register_lovelace_resource(hass: HomeAssistant, url: str) -> None:
-    """Aggiunge la card alle risorse Lovelace (storage mode) se non già presente."""
-    try:
-        from homeassistant.components.lovelace.resources import ResourceStorageCollection
-
-        lovelace = hass.data.get("lovelace")
-        if not lovelace:
-            return
-
-        resources = lovelace.get("resources")
-        if not isinstance(resources, ResourceStorageCollection):
-            return
-
-        for item in resources.async_items():
-            if item.get("url") == url:
-                _LOGGER.debug("UnipolSai: risorsa Lovelace già presente")
-                return
-
-        await resources.async_create_item({"res_type": "module", "url": url})
-        _LOGGER.info("UnipolSai: card aggiunta alle risorse Lovelace: %s", url)
-
-    except Exception as err:  # noqa: BLE001
-        _LOGGER.debug("UnipolSai: Lovelace storage non disponibile (%s), uso fallback", err)
 
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     """Registra il percorso statico e inietta la Lovelace card nel frontend."""
-    try:
-        from homeassistant.components.http import StaticPathConfig
-
-        await hass.http.async_register_static_paths([
-            StaticPathConfig(
-                url_path=_CARD_URL,
-                path=_CARD_PATH,
-                cache_headers=False,
-            )
-        ])
-        _LOGGER.debug("UnipolSai: percorso statico registrato su %s", _CARD_URL)
-    except Exception as err:  # noqa: BLE001
-        _LOGGER.warning("UnipolSai: impossibile registrare il percorso statico: %s", err)
-
-    # Fallback: inietta tramite frontend.add_extra_js_url (pre-2024 HA)
-    try:
-        from homeassistant.components import frontend
-        frontend.add_extra_js_url(hass, _CARD_URL)
-    except Exception:  # noqa: BLE001
-        pass
-
+    await hass.http.async_register_static_paths([
+        StaticPathConfig(url_path=_CARD_URL, path=str(_CARD_PATH), cache_headers=False)
+    ])
+    add_extra_js_url(hass, _CARD_URL)
+    _LOGGER.debug("UnipolSai: card registrata su %s", _CARD_URL)
     return True
 
 SERVICE_SET_TARGET_AREA = "set_target_area"
@@ -110,9 +72,6 @@ def _get_coordinators(hass: HomeAssistant, targa: str | None) -> list[UnipolSaiC
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Inizializza l'integrazione per un veicolo."""
-    # Registra la card nelle risorse Lovelace (lovelace è già caricato a questo punto)
-    hass.async_create_task(_async_register_lovelace_resource(hass, _CARD_URL))
-
     coordinator = UnipolSaiCoordinator(
         hass,
         username=entry.data["username"],

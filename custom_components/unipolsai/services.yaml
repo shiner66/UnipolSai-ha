@@ -1,0 +1,109 @@
+set_target_area:
+  name: Imposta area target
+  description: >
+    Imposta l'area geografica di riferimento per uno o tutti i veicoli configurati.
+  fields:
+    targa:
+      name: Targa
+      description: Targa del veicolo (es. AB123CD). Se omessa, agisce su tutti i veicoli configurati.
+      required: false
+      example: "AB123CD"
+      selector:
+        text:
+    latitude:
+      name: Latitudine
+      description: Latitudine del centro dell'area target.
+      required: true
+      example: 40.5578515
+      selector:
+        number:
+          min: -90
+          max: 90
+          step: 0.000001
+          mode: box
+    longitude:
+      name: Longitudine
+      description: Longitudine del centro dell'area target.
+      required: true
+      example: 14.9281384
+      selector:
+        number:
+          min: -180
+          max: 180
+          step: 0.000001
+          mode: box
+    radius:
+      name: Raggio
+      description: Raggio dell'area in metri (100–5000).
+      required: true
+      example: 500
+      selector:
+        number:
+          min: 100
+          max: 5000
+          step: 100
+          unit_of_measurement: m
+
+disable_target_area:
+  name: Disattiva area target
+  description: >
+    Disattiva l'area target per uno o tutti i veicoli configurati.
+  fields:
+    targa:
+      name: Targa
+      description: Targa del veicolo (es. AB123CD). Se omessa, agisce su tutti i veicoli configurati.
+      required: false
+      example: "AB123CD"
+      selector:
+        text:
+
+set_speed_limit:
+  name: Imposta limite velocità
+  description: >
+    Imposta il limite di velocità per uno o tutti i veicoli configurati.
+  fields:
+    targa:
+      name: Targa
+      description: Targa del veicolo (es. AB123CD). Se omessa, agisce su tutti i veicoli configurati.
+      required: false
+      example: "AB123CD"
+      selector:
+        text:
+    speed_limit:
+      name: Limite di velocità
+      description: Limite in km/h (50–150).
+      required: true
+      example: 90
+      selector:
+        number:
+          min: 50
+          max: 150
+          step: 10
+          unit_of_measurement: km/h
+
+set_usages_period:
+  name: Imposta periodo statistiche
+  description: >
+    Imposta il periodo di riferimento per le statistiche di guida.
+  fields:
+    targa:
+      name: Targa
+      description: Targa del veicolo (es. AB123CD). Se omessa, agisce su tutti i veicoli configurati.
+      required: false
+      example: "AB123CD"
+      selector:
+        text:
+    start_date:
+      name: Data inizio
+      description: Data di inizio del periodo (YYYY-MM-DD).
+      required: true
+      example: "2026-03-01"
+      selector:
+        date:
+    end_date:
+      name: Data fine
+      description: Data di fine del periodo (YYYY-MM-DD).
+      required: true
+      example: "2026-03-31"
+      selector:
+        date:
