@@ -1,11 +1,14 @@
 /**
  * UnipolSai Vehicle Card — Lovelace Custom Card
- * Version: 1.4.0
+ * Version: 1.5.0
  * Leaflet 1.9.4 bundled (no CDN required).
  *
  * Configurazione YAML:
  *   type: custom:unipolsai-vehicle-card
- *   targa: AB123CD       # opzionale — se omesso rileva tutti i veicoli UnipolSai
+ *   targa: AB123CD       # opzionale — singolo veicolo (backward compat)
+ *   vehicles:            # opzionale — lista veicoli con nome
+ *     - targa: AB123CD
+ *       name: Auto di Mario
  *   zoom: 15             # opzionale — livello di zoom iniziale (default: 15)
  *   height: 300          # opzionale — altezza mappa in px (default: 300)
  */
@@ -690,7 +693,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 	}
 `;
 
-  const CARD_VERSION = '1.4.0';
+  const CARD_VERSION = '1.5.0';
 
   // ── Leaflet loader (bundled — nessun CDN) ────────────────────────────────
   let _leafletPromise = null;
@@ -790,6 +793,9 @@ svg.leaflet-image-layer.leaflet-interactive path {
       width: 100%;
       background: var(--secondary-background-color, #f5f5f5);
       position: relative;
+      border-radius: 12px;
+      overflow: hidden;
+      margin: 0 0 2px;
     }
     .map-loading, .map-error {
       display: flex; align-items: center; justify-content: center;
@@ -817,11 +823,17 @@ svg.leaflet-image-layer.leaflet-interactive path {
     .vehicle-header:hover { background: var(--secondary-background-color, #ececec); filter: brightness(0.97); }
     .vehicle-header ha-icon { color: var(--primary-color); --mdc-icon-size: 18px; flex-shrink: 0; }
 
+    .vehicle-name {
+      font-weight: 600; font-size: 0.95em;
+      color: var(--primary-text-color);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      max-width: 120px;
+    }
     .targa-badge {
       font-weight: 700; font-size: 0.88em; letter-spacing: 1.5px;
       color: var(--primary-color);
       background: rgba(var(--rgb-primary-color, 33,150,243), 0.12);
-      padding: 2px 8px; border-radius: 4px; white-space: nowrap;
+      padding: 2px 8px; border-radius: 4px; white-space: nowrap; flex-shrink: 0;
     }
     .address-text {
       font-size: 0.82em; color: var(--secondary-text-color);
@@ -867,7 +879,18 @@ svg.leaflet-image-layer.leaflet-interactive path {
 
     /* Leaflet overrides inside shadow root */
     .leaflet-container { font-family: inherit; }
-    .leaflet-popup-content-wrapper { border-radius: 8px; }
+    .leaflet-popup-content-wrapper {
+      border-radius: 10px;
+      border: none;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.18), 0 1px 4px rgba(0,0,0,0.1);
+      padding: 0;
+    }
+    .leaflet-popup-content {
+      margin: 10px 14px;
+      font-size: 0.9em;
+      line-height: 1.5;
+    }
+    .leaflet-popup-tip-container { filter: drop-shadow(0 2px 4px rgba(0,0,0,0.12)); }
   `;
 
   // ── Main Card Class ────────────────────────────────────────────────────────
@@ -887,15 +910,21 @@ svg.leaflet-image-layer.leaflet-interactive path {
 
     // HA chiama questo per la configurazione di default nel visual editor
     static getStubConfig() {
-      return { targa: '' };
+      return { vehicles: [{ targa: '', name: '' }] };
     }
 
     setConfig(config) {
       if (!config) throw new Error('Configurazione mancante');
       this._config = config;
-      this._vehicles = config.targa
-        ? [String(config.targa).toUpperCase()]
-        : [];
+      if (config.vehicles && Array.isArray(config.vehicles)) {
+        this._vehicles = config.vehicles
+          .filter(v => v && v.targa)
+          .map(v => ({ targa: String(v.targa).toUpperCase(), name: v.name || null }));
+      } else if (config.targa) {
+        this._vehicles = [{ targa: String(config.targa).toUpperCase(), name: null }];
+      } else {
+        this._vehicles = [];
+      }
       // Reset al cambio config
       if (this._ready) {
         this._ready = false;
@@ -908,7 +937,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 
     set hass(hass) {
       this._hass = hass;
-      if (!this._config?.targa) {
+      if (!this._config?.targa && !this._config?.vehicles) {
         this._autoDiscover();
       }
       if (!this._ready && !this._initializing && this._vehicles.length > 0) {
@@ -922,16 +951,16 @@ svg.leaflet-image-layer.leaflet-interactive path {
 
     /** Rileva automaticamente i veicoli UnipolSai cercando il pattern targa nell'attributo. */
     _autoDiscover() {
-      const found = [];
+      const foundTargas = [];
       for (const [eid, state] of Object.entries(this._hass.states)) {
         if (!eid.startsWith('device_tracker.auto_')) continue;
         const t = state.attributes?.targa;
-        if (t && !found.includes(t.toUpperCase())) {
-          found.push(t.toUpperCase());
+        if (t && !foundTargas.includes(t.toUpperCase())) {
+          foundTargas.push(t.toUpperCase());
         }
       }
       // Fallback: cerca entità con unique_id pattern unipolsai_*_tracker tramite entity_id
-      if (found.length === 0) {
+      if (foundTargas.length === 0) {
         for (const eid of Object.keys(this._hass.states)) {
           if (!eid.startsWith('device_tracker.auto_')) continue;
           // estrai targa dall'entity_id (device_tracker.auto_ab123cd → AB123CD)
@@ -939,11 +968,13 @@ svg.leaflet-image-layer.leaflet-interactive path {
           // verifica che esista il sensore crediti corrispondente
           const credEid = `sensor.crediti_car_finder_${_slugify(candidate)}`;
           if (this._hass.states[credEid]) {
-            if (!found.includes(candidate)) found.push(candidate);
+            if (!foundTargas.includes(candidate)) foundTargas.push(candidate);
           }
         }
       }
-      if (JSON.stringify(found) !== JSON.stringify(this._vehicles)) {
+      const found = foundTargas.map(t => ({ targa: t, name: null }));
+      const curTargas = this._vehicles.map(v => v.targa);
+      if (JSON.stringify(foundTargas) !== JSON.stringify(curTargas)) {
         this._vehicles = found;
         // Se cambia il numero di veicoli, re-init
         if (this._ready) {
@@ -1015,9 +1046,10 @@ svg.leaflet-image-layer.leaflet-interactive path {
         attributionControl: true,
       });
 
-      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
-        maxZoom: 19,
+      L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+        attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> © <a href="https://carto.com/attributions">CARTO</a>',
+        subdomains: 'abcd',
+        maxZoom: 20,
       }).addTo(this._map);
 
       // Forza ridimensionamento dopo init
@@ -1034,7 +1066,9 @@ svg.leaflet-image-layer.leaflet-interactive path {
       infoEl.innerHTML = '';
       const bounds = [];
 
-      for (const targa of this._vehicles) {
+      for (const vehicle of this._vehicles) {
+        const targa = vehicle.targa;
+        const vehicleName = vehicle.name || null;
         const ids = _entityIds(targa);
         const tracker    = hass.states[ids.tracker];
         const credSt     = hass.states[ids.credits];
@@ -1066,13 +1100,19 @@ svg.leaflet-image-layer.leaflet-interactive path {
 
           if (this._markers[targa]) {
             this._markers[targa].setLatLng(pos).setIcon(icon);
+            const popupContent = vehicleName
+              ? `<b>${vehicleName}</b><br><span style="font-size:0.85em;opacity:0.75">${targa}</span>${address ? '<br>' + address : ''}`
+              : `<b>${targa}</b>${address ? '<br>' + address : ''}`;
             this._markers[targa]
               .getPopup()
-              ?.setContent(`<b>${targa}</b>${address ? '<br>' + address : ''}`);
+              ?.setContent(popupContent);
           } else {
+            const popupContentNew = vehicleName
+              ? `<b>${vehicleName}</b><br><span style="font-size:0.85em;opacity:0.75">${targa}</span>${address ? '<br>' + address : ''}`
+              : `<b>${targa}</b>${address ? '<br>' + address : ''}`;
             this._markers[targa] = L.marker(pos, { icon })
               .addTo(this._map)
-              .bindPopup(`<b>${targa}</b>${address ? '<br>' + address : ''}`);
+              .bindPopup(popupContentNew);
           }
         }
 
@@ -1104,7 +1144,9 @@ svg.leaflet-image-layer.leaflet-interactive path {
         panel.innerHTML = `
           <div class="vehicle-header" title="Centra mappa su ${targa}">
             <ha-icon icon="mdi:car"></ha-icon>
-            <span class="targa-badge">${targa}</span>
+            ${vehicleName
+              ? `<span class="vehicle-name">${vehicleName}</span><span class="targa-badge">${targa}</span>`
+              : `<span class="targa-badge">${targa}</span>`}
             <span class="address-text">${address || 'Posizione non disponibile'}</span>
           </div>
           <div class="stats-row">
