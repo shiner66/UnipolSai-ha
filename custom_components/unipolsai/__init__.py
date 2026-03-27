@@ -17,7 +17,7 @@ _LOGGER = logging.getLogger(__name__)
 
 PLATFORMS = ["device_tracker", "sensor", "button", "binary_sensor"]
 
-_VERSION = "1.5.0"
+_VERSION = "1.5.1"
 _CARD_URL = f"/{DOMAIN}/{_VERSION}/unipolsai-vehicle-card.js"
 _CARD_PATH = Path(__file__).parent / "frontend" / "unipolsai-vehicle-card.js"
 
