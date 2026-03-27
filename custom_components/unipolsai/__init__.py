@@ -8,6 +8,7 @@ from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.helpers import config_validation as cv
+from homeassistant.setup import async_when_setup
 
 from .const import DOMAIN
 from .coordinator import UnipolSaiCoordinator
@@ -21,12 +22,70 @@ _CARD_URL = f"/{DOMAIN}/{_VERSION}/unipolsai-vehicle-card.js"
 _CARD_PATH = Path(__file__).parent / "frontend" / "unipolsai-vehicle-card.js"
 
 
+async def _async_register_lovelace_resource(hass: HomeAssistant, _component: str = "") -> None:
+    """Aggiunge la card alle risorse Lovelace (storage mode).
+
+    Questo garantisce che Lovelace carichi lo script *prima* di tentare di
+    renderizzare le card, eliminando il race condition del 'custom element
+    not found' al primo caricamento.
+    """
+    try:
+        from homeassistant.components.lovelace.resources import ResourceStorageCollection  # noqa: PLC0415
+
+        lovelace_data = hass.data.get("lovelace")
+        if lovelace_data is None:
+            return
+
+        # HA può esporre le risorse come dict o come attributo dell'oggetto
+        if isinstance(lovelace_data, dict):
+            resources = lovelace_data.get("resources")
+        else:
+            resources = getattr(lovelace_data, "resources", None)
+
+        if not isinstance(resources, ResourceStorageCollection):
+            # Modalità YAML: add_extra_js_url è l'unica strada
+            return
+
+        await resources.async_load()
+
+        # Rimuove eventuali entry obsolete dello stesso dominio (versione precedente)
+        stale = [
+            item["id"]
+            for item in resources.async_items()
+            if item.get("url", "").startswith(f"/{DOMAIN}/")
+            and item.get("url") != _CARD_URL
+        ]
+        for item_id in stale:
+            try:
+                await resources.async_delete_item(item_id)
+                _LOGGER.debug("UnipolSai: rimossa risorsa Lovelace obsoleta (id=%s)", item_id)
+            except Exception:  # noqa: BLE001
+                pass
+
+        # Aggiunge la versione corrente se non è già presente
+        already = any(item.get("url") == _CARD_URL for item in resources.async_items())
+        if not already:
+            await resources.async_create_item({"res_type": "module", "url": _CARD_URL})
+            _LOGGER.debug("UnipolSai: card aggiunta alle risorse Lovelace (%s)", _CARD_URL)
+
+    except Exception as exc:  # noqa: BLE001
+        # Non fatale: add_extra_js_url fa da fallback in modalità YAML
+        _LOGGER.debug("UnipolSai: registrazione risorsa Lovelace non riuscita: %s", exc)
+
+
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     """Registra il percorso statico e inietta la Lovelace card nel frontend."""
     await hass.http.async_register_static_paths([
         StaticPathConfig(url_path=_CARD_URL, path=str(_CARD_PATH), cache_headers=False)
     ])
+
+    # Fallback per modalità YAML (lovelace non usa storage)
     add_extra_js_url(hass, _CARD_URL)
+
+    # Registrazione affidabile via risorse Lovelace (storage mode).
+    # async_when_setup chiama subito se lovelace è già pronto, altrimenti aspetta.
+    async_when_setup(hass, "lovelace", _async_register_lovelace_resource)
+
     _LOGGER.debug("UnipolSai: card registrata su %s", _CARD_URL)
     return True
 
