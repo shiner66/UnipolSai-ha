@@ -6,6 +6,20 @@ e il versioning segue [Semantic Versioning](https://semver.org/lang/it/).
 
 ---
 
+## [1.5.1] — 2026-03-27
+
+### Corretto
+- **"Custom element not found"** al primo caricamento dopo restart di HA:
+  la card viene ora registrata come risorsa Lovelace nativa (stesso meccanismo
+  di HACS) invece di affidarsi solo a `add_extra_js_url`. Lovelace attende il
+  caricamento di tutte le risorse prima di renderizzare i pannelli, eliminando
+  il race condition. `add_extra_js_url` rimane come fallback per la modalità
+  YAML.
+- Pulizia automatica delle risorse Lovelace obsolete alla versione precedente
+  al momento dell'aggiornamento dell'integrazione.
+
+---
+
 ## [1.5.0] — 2026-03-23
 
 ### Aggiunto

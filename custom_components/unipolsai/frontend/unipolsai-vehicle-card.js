@@ -693,7 +693,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 	}
 `;
 
-  const CARD_VERSION = '1.5.0';
+  const CARD_VERSION = '1.5.1';
 
   // ── Leaflet loader (bundled — nessun CDN) ────────────────────────────────
   let _leafletPromise = null;
