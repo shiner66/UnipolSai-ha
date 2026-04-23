@@ -33,7 +33,7 @@ from .const import (
 
 _LOGGER = logging.getLogger(__name__)
 
-FAST_POLL_INTERVAL = timedelta(seconds=10)
+FAST_POLL_INTERVAL = timedelta(seconds=3)
 PENDING_TIMEOUT = 300
 CONTRACT_REFRESH_INTERVAL = 3600  # 1 ora
 GEOCODE_CACHE_DISTANCE = 0.001    # ~100m: non ri-geocodifica se ci si sposta poco
@@ -704,10 +704,14 @@ class UnipolSaiCoordinator(DataUpdateCoordinator):
 
     async def async_request_live_position(self) -> None:
         await self._ensure_token()
+        # Attiva subito lo stato "in corso" per riflettere immediatamente
+        # la richiesta lato UI, poi avvia sempre un ciclo di fast polling.
+        self._pending_since = time.monotonic()
+        self.async_update_listeners()
+
         position = await self._fetch_position(force_update=True)
         self.async_set_updated_data(position)
-        if position.get("pendingRequest"):
-            self._start_fast_polling()
+        self._start_fast_polling()
 
     def _start_fast_polling(self) -> None:
         self._pending_since = time.monotonic()
@@ -721,6 +725,7 @@ class UnipolSaiCoordinator(DataUpdateCoordinator):
             elapsed = time.monotonic() - (self._pending_since or 0)
             if elapsed > PENDING_TIMEOUT:
                 self._pending_since = None
+                self.async_update_listeners()
                 break
             try:
                 await self._ensure_token()
@@ -728,10 +733,12 @@ class UnipolSaiCoordinator(DataUpdateCoordinator):
                 self.async_set_updated_data(position)
                 if not position.get("pendingRequest", False):
                     self._pending_since = None
+                    self.async_update_listeners()
                     break
             except Exception as err:
                 _LOGGER.error("UnipolSai: errore fast poll: %s", err)
                 self._pending_since = None
+                self.async_update_listeners()
                 break
 
     # ------------------------------------------------------------------
