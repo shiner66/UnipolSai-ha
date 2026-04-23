@@ -19,7 +19,7 @@ e il versioning segue [Semantic Versioning](https://semver.org/lang/it/).
 
 ### Modificato
 - Workflow beta (`.github/workflows/beta-release.yml`) aggiornato per creare
-  pre-release anche dal branch `work`.
+  pre-release anche dai branch `work` e `codex/**`.
 
 ---
 
