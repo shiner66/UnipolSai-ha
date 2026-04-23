@@ -4,6 +4,8 @@ on:
   push:
     branches:
       - 'claude/**'
+      - 'codex/**'
+      - 'work'
 
 jobs:
   beta-release:

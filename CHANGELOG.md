@@ -6,6 +6,23 @@ e il versioning segue [Semantic Versioning](https://semver.org/lang/it/).
 
 ---
 
+## [1.5.2] — 2026-04-23
+
+### Corretto
+- Polling live GPS post-richiesta manuale reso più rapido (`3s` invece di `10s`)
+  per intercettare prima l'aggiornamento della posizione.
+- Stato `aggiornamento gps in corso` attivato immediatamente al click del
+  pulsante live, così il binary sensor si accende subito lato Home Assistant.
+- Fast polling reso più robusto: il ciclo ora continua finché non arriva una
+  posizione più recente (timestamp `date`) oppure finché una richiesta
+  `pendingRequest` non si chiude esplicitamente, evitando uscite premature.
+
+### Modificato
+- Workflow beta (`.github/workflows/beta-release.yml`) aggiornato per creare
+  pre-release anche dai branch `work` e `codex/**`.
+
+---
+
 ## [1.5.1] — 2026-03-27
 
 ### Corretto
