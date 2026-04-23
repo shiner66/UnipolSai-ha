@@ -57,6 +57,8 @@ class UnipolSaiCoordinator(DataUpdateCoordinator):
         self._normal_interval = timedelta(minutes=scan_interval)
         self._pending_since: float | None = None
         self._fast_polling_task: asyncio.Task | None = None
+        self._fast_poll_reference_ts: int | float | None = None
+        self._fast_poll_seen_pending: bool = False
 
         # Notifiche
         self._last_seen_car_moved_id: str | None = None
@@ -706,39 +708,65 @@ class UnipolSaiCoordinator(DataUpdateCoordinator):
         await self._ensure_token()
         # Attiva subito lo stato "in corso" per riflettere immediatamente
         # la richiesta lato UI, poi avvia sempre un ciclo di fast polling.
+        previous_ts = (self.data or {}).get("date")
         self._pending_since = time.monotonic()
         self.async_update_listeners()
 
         position = await self._fetch_position(force_update=True)
         self.async_set_updated_data(position)
-        self._start_fast_polling()
+        reference_ts = position.get("date") if position.get("date") is not None else previous_ts
+        self._start_fast_polling(
+            reference_ts=reference_ts,
+            seen_pending=bool(position.get("pendingRequest", False)),
+        )
 
-    def _start_fast_polling(self) -> None:
+    def _start_fast_polling(
+        self,
+        reference_ts: int | float | None = None,
+        seen_pending: bool = False,
+    ) -> None:
         self._pending_since = time.monotonic()
+        self._fast_poll_reference_ts = reference_ts
+        self._fast_poll_seen_pending = seen_pending
         if self._fast_polling_task and not self._fast_polling_task.done():
             self._fast_polling_task.cancel()
         self._fast_polling_task = self.hass.async_create_task(self._fast_poll_loop())
+
+    def _stop_fast_polling(self) -> None:
+        self._pending_since = None
+        self._fast_poll_reference_ts = None
+        self._fast_poll_seen_pending = False
+        self.async_update_listeners()
 
     async def _fast_poll_loop(self) -> None:
         while True:
             await asyncio.sleep(FAST_POLL_INTERVAL.seconds)
             elapsed = time.monotonic() - (self._pending_since or 0)
             if elapsed > PENDING_TIMEOUT:
-                self._pending_since = None
-                self.async_update_listeners()
+                self._stop_fast_polling()
                 break
             try:
                 await self._ensure_token()
                 position = await self._fetch_position(force_update=False)
                 self.async_set_updated_data(position)
-                if not position.get("pendingRequest", False):
-                    self._pending_since = None
-                    self.async_update_listeners()
+
+                is_pending = bool(position.get("pendingRequest", False))
+                if is_pending:
+                    self._fast_poll_seen_pending = True
+
+                date_value = position.get("date")
+                got_newer_position = (
+                    self._fast_poll_reference_ts is not None
+                    and isinstance(date_value, (int, float))
+                    and date_value > self._fast_poll_reference_ts
+                )
+
+                if got_newer_position or (self._fast_poll_seen_pending and not is_pending):
+                    self._stop_fast_polling()
                     break
             except Exception as err:
                 _LOGGER.error("UnipolSai: errore fast poll: %s", err)
-                self._pending_since = None
-                self.async_update_listeners()
+                self._stop_fast_polling()
                 break
 
     # ------------------------------------------------------------------
