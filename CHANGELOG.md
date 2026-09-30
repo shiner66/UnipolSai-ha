@@ -6,6 +6,22 @@ e il versioning segue [Semantic Versioning](https://semver.org/lang/it/).
 
 ---
 
+## [1.5.3] — 2026-09-30
+
+### Corretto
+- Sostituito il server pubblico `tile.openstreetmap.org`, che può rifiutare le
+  richieste del frontend Home Assistant con `403` per la propria tile usage
+  policy, con lo stile vettoriale Liberty di OpenFreeMap: nessuna API key e
+  nomi delle strade visibili. MapLibre GL JS 5.24.0 e l'adapter Leaflet 0.1.4
+  sono inclusi nell'integrazione, senza dipendenze CDN. Se OpenFreeMap non
+  completa il caricamento, la card passa automaticamente a OpenTopoMap.
+- Eliminata una race condition all'avvio che poteva ricaricare dallo storage
+  una vecchia risorsa Lovelace e lasciare attiva la card con le tile CARTO.
+- La registrazione della card rimuove ora tutte le versioni obsolete e gli
+  eventuali duplicati, mantenendo una sola risorsa per la versione corrente.
+
+---
+
 ## [1.5.2] — 2026-09-30
 
 ### Corretto

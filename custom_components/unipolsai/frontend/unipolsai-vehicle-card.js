@@ -1,7 +1,7 @@
 /**
  * UnipolSai Vehicle Card — Lovelace Custom Card
- * Version: 1.5.2
- * Leaflet 1.9.4 bundled (no CDN required).
+ * Version: 1.5.3
+ * Leaflet 1.9.4, MapLibre GL JS 5.24.0 e adapter 0.1.4 bundled.
  *
  * Configurazione YAML:
  *   type: custom:unipolsai-vehicle-card
@@ -693,13 +693,48 @@ svg.leaflet-image-layer.leaflet-interactive path {
 	}
 `;
 
-  const CARD_VERSION = '1.5.2';
-  const MAP_TILE_URL = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
+  const CARD_VERSION = '1.5.3';
+  const MAPLIBRE_VERSION = '5.24.0';
+  const MAPLIBRE_ADAPTER_VERSION = '0.1.4';
+  const VENDOR_URL = `/unipolsai/${CARD_VERSION}/vendor`;
+  const MAPLIBRE_JS_URL = `${VENDOR_URL}/maplibre-gl.js`;
+  const MAPLIBRE_CSS_URL = `${VENDOR_URL}/maplibre-gl.css`;
+  const MAPLIBRE_ADAPTER_URL = `${VENDOR_URL}/leaflet-maplibre-gl.js`;
+  const MAP_STYLE_URL = 'https://tiles.openfreemap.org/styles/liberty';
   const MAP_ATTRIBUTION =
-    '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">OpenStreetMap</a> contributors';
+    '<a href="https://openfreemap.org/" target="_blank" rel="noopener noreferrer">OpenFreeMap</a> '
+    + '<a href="https://www.openmaptiles.org/" target="_blank" rel="noopener noreferrer">&copy; OpenMapTiles</a> · '
+    + 'dati <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">&copy; OpenStreetMap contributors</a>';
+  const FALLBACK_TILE_URL = 'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png';
+  const FALLBACK_ATTRIBUTION =
+    'Dati <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">&copy; OpenStreetMap contributors</a>, '
+    + '<a href="https://www2.jpl.nasa.gov/srtm/" target="_blank" rel="noopener noreferrer">SRTM</a> · '
+    + 'stile <a href="https://opentopomap.org/" target="_blank" rel="noopener noreferrer">&copy; OpenTopoMap</a> '
+    + '(<a href="https://creativecommons.org/licenses/by-sa/3.0/" target="_blank" rel="noopener noreferrer">CC-BY-SA 3.0</a>)';
+  const MAP_LOAD_TIMEOUT_MS = 12000;
 
   // ── Leaflet loader (bundled — nessun CDN) ────────────────────────────────
   let _leafletPromise = null;
+
+  function _loadScript(url) {
+    const existing = document.querySelector(`script[src="${url}"]`);
+    if (existing?.dataset.loaded === 'true') return Promise.resolve();
+    return new Promise((resolve, reject) => {
+      const script = existing || document.createElement('script');
+      const onLoad = () => {
+        script.dataset.loaded = 'true';
+        resolve();
+      };
+      const onError = () => reject(new Error(`impossibile caricare ${url.split('/').pop()}`));
+      script.addEventListener('load', onLoad, { once: true });
+      script.addEventListener('error', onError, { once: true });
+      if (!existing) {
+        script.src = url;
+        script.async = true;
+        document.head.appendChild(script);
+      }
+    });
+  }
 
   function _loadLeaflet() {
     if (_leafletPromise) return _leafletPromise;
@@ -708,7 +743,21 @@ svg.leaflet-image-layer.leaflet-interactive path {
     if (!L) {
       _leafletPromise = Promise.reject(new Error('Leaflet non trovato nel bundle'));
     } else {
-      _leafletPromise = Promise.resolve(L);
+      _leafletPromise = (async () => {
+        try {
+          if (!window.maplibregl?.Map) await _loadScript(MAPLIBRE_JS_URL);
+          if (!window.maplibregl?.Map) throw new Error(`MapLibre ${MAPLIBRE_VERSION} non disponibile`);
+          if (!L.maplibreGL) await _loadScript(MAPLIBRE_ADAPTER_URL);
+          if (!L.maplibreGL) {
+            throw new Error(`adapter MapLibre/Leaflet ${MAPLIBRE_ADAPTER_VERSION} non disponibile`);
+          }
+        } catch (error) {
+          // Leaflet è già incluso: il renderer raster resta disponibile anche
+          // se un browser non riesce a inizializzare gli asset MapLibre.
+          console.warn('[UnipolSai] renderer vettoriale non disponibile:', error);
+        }
+        return L;
+      })();
     }
     return _leafletPromise;
   }
@@ -838,6 +887,12 @@ svg.leaflet-image-layer.leaflet-interactive path {
       color: var(--secondary-text-color); font-size: 0.9em; text-align: center;
     }
     .map-error { color: var(--error-color, #db4437); }
+    .map-runtime-error {
+      position: absolute; left: 8px; right: 8px; bottom: 24px; z-index: 1001;
+      padding: 8px 10px; border-radius: 6px;
+      color: #fff; background: rgba(183, 28, 28, .92);
+      font-size: .78em; text-align: center; pointer-events: none;
+    }
 
     /* Vehicle panels */
     .vehicles-info { padding: 8px 12px 12px; display: flex; flex-direction: column; gap: 8px; }
@@ -943,6 +998,8 @@ svg.leaflet-image-layer.leaflet-interactive path {
       this._ready = false;
       this._generation = 0;
       this._invalidateTimer = null;
+      this._mapLoadTimer = null;
+      this._baseLayer = null;
       this._lastBoundsSignature = null;
     }
 
@@ -1000,6 +1057,10 @@ svg.leaflet-image-layer.leaflet-interactive path {
         clearTimeout(this._invalidateTimer);
         this._invalidateTimer = null;
       }
+      if (this._mapLoadTimer !== null) {
+        clearTimeout(this._mapLoadTimer);
+        this._mapLoadTimer = null;
+      }
       if (this._map) {
         try {
           this._map.remove();
@@ -1008,6 +1069,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
         }
       }
       this._map = null;
+      this._baseLayer = null;
       this._L = null;
       this._markers = {};
       this._lastBoundsSignature = null;
@@ -1089,6 +1151,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
       const mapH = _configNumber(this._config?.height, 300, 120, 1000);
       const root = this.shadowRoot;
       root.innerHTML = `
+        <link rel="stylesheet" href="${MAPLIBRE_CSS_URL}">
         <style>${STYLES}</style>
         <ha-card>
           <div class="card-header">
@@ -1118,13 +1181,131 @@ svg.leaflet-image-layer.leaflet-interactive path {
         attributionControl: true,
       });
 
-      L.tileLayer(MAP_TILE_URL, {
-        attribution: MAP_ATTRIBUTION,
-        maxZoom: 19,
-      }).addTo(this._map);
+      this._addVectorLayer(L);
 
       // Forza ridimensionamento dopo init
       this._scheduleInvalidate(250);
+    }
+
+    _addVectorLayer(L) {
+      const map = this._map;
+      if (!map) return;
+
+      if (!L.maplibreGL) {
+        console.warn('[UnipolSai] adapter MapLibre non disponibile; uso OpenTopoMap.');
+        this._addFallbackLayer(L, map);
+        return;
+      }
+
+      let loaded = false;
+      let errorCount = 0;
+      let switched = false;
+      let layer;
+      try {
+        layer = L.maplibreGL({
+          style: MAP_STYLE_URL,
+          attributionControl: { customAttribution: MAP_ATTRIBUTION },
+          interactive: false,
+        }).addTo(map);
+      } catch (error) {
+        console.warn('[UnipolSai] impossibile inizializzare MapLibre; uso OpenTopoMap.', error);
+        this._addFallbackLayer(L, map);
+        return;
+      }
+      this._baseLayer = layer;
+
+      const useFallback = reason => {
+        if (switched || this._map !== map) return;
+        switched = true;
+        if (this._mapLoadTimer !== null) {
+          clearTimeout(this._mapLoadTimer);
+          this._mapLoadTimer = null;
+        }
+        console.warn(`[UnipolSai] OpenFreeMap non disponibile (${reason}); uso OpenTopoMap.`);
+        if (map.hasLayer(layer)) map.removeLayer(layer);
+        this._addFallbackLayer(L, map);
+      };
+
+      let glMap;
+      try {
+        glMap = layer.getMaplibreMap();
+      } catch (error) {
+        useFallback(error?.message || 'renderer MapLibre non inizializzato');
+        return;
+      }
+      if (!glMap) {
+        useFallback('renderer MapLibre non inizializzato');
+        return;
+      }
+      glMap.once('load', () => {
+        if (switched) return;
+        loaded = true;
+        if (this._mapLoadTimer !== null) {
+          clearTimeout(this._mapLoadTimer);
+          this._mapLoadTimer = null;
+        }
+        this.shadowRoot.querySelector('.map-runtime-error')?.remove();
+      });
+      glMap.on('error', event => {
+        const message = event?.error?.message || 'errore sconosciuto';
+        console.warn('[UnipolSai] errore OpenFreeMap:', message);
+        if (!loaded && ++errorCount >= 2) useFallback(message);
+      });
+      this._mapLoadTimer = setTimeout(
+        () => { if (!loaded) useFallback('timeout di caricamento'); },
+        MAP_LOAD_TIMEOUT_MS,
+      );
+    }
+
+    _addFallbackLayer(L, map) {
+      if (this._map !== map) return;
+      let loaded = false;
+      let errorCount = 0;
+      let layer;
+      try {
+        layer = L.tileLayer(FALLBACK_TILE_URL, {
+          attribution: FALLBACK_ATTRIBUTION,
+          maxZoom: 19,
+          maxNativeZoom: 17,
+          updateWhenIdle: true,
+          keepBuffer: 1,
+        });
+      } catch (error) {
+        console.error('[UnipolSai] impossibile inizializzare OpenTopoMap:', error);
+        this._showMapRuntimeError('Mappa non disponibile: renderer non inizializzato.');
+        return;
+      }
+      this._baseLayer = layer;
+      layer.on('load', () => {
+        loaded = true;
+        if (this._mapLoadTimer !== null) {
+          clearTimeout(this._mapLoadTimer);
+          this._mapLoadTimer = null;
+        }
+        this.shadowRoot.querySelector('.map-runtime-error')?.remove();
+      });
+      layer.on('tileerror', () => {
+        errorCount += 1;
+        if (!loaded && errorCount >= 2) {
+          this._showMapRuntimeError(
+            'Mappa non disponibile: OpenFreeMap e OpenTopoMap non rispondono.',
+          );
+        }
+      });
+      try {
+        layer.addTo(map);
+      } catch (error) {
+        console.error('[UnipolSai] impossibile caricare OpenTopoMap:', error);
+        this._showMapRuntimeError('Mappa non disponibile: OpenTopoMap non inizializzato.');
+        return;
+      }
+      this._mapLoadTimer = setTimeout(() => {
+        if (!loaded && this._map === map) {
+          this._showMapRuntimeError(
+            'Mappa non disponibile: timeout di OpenFreeMap e OpenTopoMap.',
+          );
+        }
+      }, MAP_LOAD_TIMEOUT_MS);
     }
 
     _update() {
@@ -1302,6 +1483,18 @@ svg.leaflet-image-layer.leaflet-interactive path {
       error.className = 'map-error';
       error.textContent = `⚠️ ${message}`;
       container.appendChild(error);
+    }
+
+    _showMapRuntimeError(message) {
+      const container = this.shadowRoot?.getElementById('map-container');
+      if (!container) return;
+      let error = container.querySelector('.map-runtime-error');
+      if (!error) {
+        error = document.createElement('div');
+        error.className = 'map-runtime-error';
+        container.appendChild(error);
+      }
+      error.textContent = `⚠️ ${message}`;
     }
 
     getCardSize() {

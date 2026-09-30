@@ -62,7 +62,7 @@ Integrazione non ufficiale per Home Assistant che espone i dati della scatola ne
 
 L'integrazione include una **scheda Lovelace personalizzata** che mostra in un'unica vista:
 
-- 🗺️ **Mappa interattiva** OpenStreetMap con nomi di strade e marker per ogni veicolo, senza API key
+- 🗺️ **Mappa interattiva** vettoriale OpenFreeMap con nomi di strade e marker per ogni veicolo, senza API key e con fallback OpenTopoMap
 - 🏷️ **Nome personalizzato** per ciascun veicolo (opzionale)
 - 🔋 **Crediti Car Finder rimanenti** oggi (es. `3/5 crediti`)
 - 🕐 **Timestamp ultimo aggiornamento GPS**
@@ -143,7 +143,7 @@ height: 350                # altezza della mappa in pixel (default: 300)
 | **Pulsante Aggiorna** | Invia richiesta fix GPS live (consuma 1 credito) |
 | **Chip "Aggiornamento GPS…"** | Animato, visibile mentre il fix è in elaborazione |
 
-> **Nota:** La mappa richiede connessione internet per caricare le tile standard OpenStreetMap. Non è necessaria alcuna API key; in reti isolate la mappa potrebbe non essere disponibile.
+> **Nota:** La mappa richiede connessione internet per caricare lo stile vettoriale Liberty di OpenFreeMap o il fallback OpenTopoMap. Non è necessaria alcuna API key; in reti isolate la mappa potrebbe non essere disponibile.
 
 ---
 
@@ -274,7 +274,7 @@ automation:
 - I **crediti Car Finder** (max 5/giorno) vengono usati solo dal pulsante "Aggiorna posizione GPS". Il polling normale usa `update=false` e non li consuma
 - I **dati contratto** vengono aggiornati ogni ora, indipendentemente dall'intervallo di polling GPS
 - La **geocodifica inversa** usa Nominatim (OpenStreetMap) gratuitamente, senza API key
-- La **mappa** usa le tile standard OpenStreetMap, con nomi di strade e senza API key; la libreria Leaflet 1.9.4 è inclusa nel JS, senza dipendenze CDN
+- La **mappa** usa lo stile vettoriale Liberty di OpenFreeMap, con nomi di strade e senza API key, e passa automaticamente a OpenTopoMap se il servizio non risponde; Leaflet 1.9.4, MapLibre GL JS 5.24.0 e l'adapter MapLibre/Leaflet 0.1.4 sono inclusi nell'integrazione, senza dipendenze CDN
 - Gli **header dell'app** (`x-ibm-client-id`, ecc.) sono credenziali dell'applicazione mobile pubblica UnipolSai, non credenziali personali
 
 ---

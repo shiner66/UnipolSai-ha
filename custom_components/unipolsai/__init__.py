@@ -22,9 +22,24 @@ _LOGGER = logging.getLogger(__name__)
 
 PLATFORMS = ["device_tracker", "sensor", "button", "binary_sensor"]
 
-_VERSION = "1.5.2"
+_VERSION = "1.5.3"
 _CARD_URL = f"/{DOMAIN}/{_VERSION}/unipolsai-vehicle-card.js"
-_CARD_PATH = Path(__file__).parent / "frontend" / "unipolsai-vehicle-card.js"
+_FRONTEND_PATH = Path(__file__).parent / "frontend"
+_STATIC_ASSETS = (
+    (_CARD_URL, _FRONTEND_PATH / "unipolsai-vehicle-card.js"),
+    (
+        f"/{DOMAIN}/{_VERSION}/vendor/maplibre-gl.js",
+        _FRONTEND_PATH / "vendor" / "maplibre-gl.js",
+    ),
+    (
+        f"/{DOMAIN}/{_VERSION}/vendor/maplibre-gl.css",
+        _FRONTEND_PATH / "vendor" / "maplibre-gl.css",
+    ),
+    (
+        f"/{DOMAIN}/{_VERSION}/vendor/leaflet-maplibre-gl.js",
+        _FRONTEND_PATH / "vendor" / "leaflet-maplibre-gl.js",
+    ),
+)
 
 
 async def _async_register_lovelace_resource(hass: HomeAssistant, _component: str = "") -> None:
@@ -51,25 +66,36 @@ async def _async_register_lovelace_resource(hass: HomeAssistant, _component: str
             # Modalità YAML: add_extra_js_url è l'unica strada
             return
 
-        await resources.async_load()
+        # Usa l'API pubblica che marca la collection come caricata. Chiamare
+        # async_load() direttamente lascia ``loaded`` a False e permette al
+        # websocket Lovelace di rileggere dal disco le risorse appena rimosse.
+        await resources.async_get_info()
 
-        # Rimuove eventuali entry obsolete dello stesso dominio (versione precedente)
-        stale = [
-            item["id"]
-            for item in resources.async_items()
-            if item.get("url", "").startswith(f"/{DOMAIN}/")
-            and item.get("url") != _CARD_URL
-        ]
-        for item_id in stale:
+        # Mantiene una sola entry per la versione corrente e rimuove sia le
+        # versioni obsolete sia eventuali duplicati creati da startup passati.
+        current_found = False
+        remove_ids = []
+        for item in resources.async_items():
+            url = item.get("url", "")
+            if not url.startswith(f"/{DOMAIN}/"):
+                continue
+            if url == _CARD_URL and not current_found:
+                current_found = True
+                continue
+            remove_ids.append(item["id"])
+
+        for item_id in remove_ids:
             try:
                 await resources.async_delete_item(item_id)
-                _LOGGER.debug("UnipolSai: rimossa risorsa Lovelace obsoleta (id=%s)", item_id)
+                _LOGGER.debug(
+                    "UnipolSai: rimossa risorsa Lovelace duplicata/obsoleta (id=%s)",
+                    item_id,
+                )
             except Exception:  # noqa: BLE001
                 pass
 
         # Aggiunge la versione corrente se non è già presente
-        already = any(item.get("url") == _CARD_URL for item in resources.async_items())
-        if not already:
+        if not current_found:
             await resources.async_create_item({"res_type": "module", "url": _CARD_URL})
             _LOGGER.debug("UnipolSai: card aggiunta alle risorse Lovelace (%s)", _CARD_URL)
 
@@ -88,20 +114,24 @@ async def _async_register_frontend_module(
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     """Registra il percorso statico e inietta la Lovelace card nel frontend."""
     if StaticPathConfig is not None:
-        await hass.http.async_register_static_paths([
-            StaticPathConfig(
-                url_path=_CARD_URL,
-                path=str(_CARD_PATH),
-                cache_headers=False,
-            )
-        ])
+        await hass.http.async_register_static_paths(
+            [
+                StaticPathConfig(
+                    url_path=url,
+                    path=str(path),
+                    cache_headers=False,
+                )
+                for url, path in _STATIC_ASSETS
+            ]
+        )
     else:
         # API sincrona usata dalle versioni HA precedenti a StaticPathConfig.
-        hass.http.register_static_path(
-            _CARD_URL,
-            str(_CARD_PATH),
-            cache_headers=False,
-        )
+        for url, path in _STATIC_ASSETS:
+            hass.http.register_static_path(
+                url,
+                str(path),
+                cache_headers=False,
+            )
 
     # Fallback per modalità YAML (lovelace non usa storage). In installazioni
     # headless il frontend può non essere caricato: in quel caso i sensori
