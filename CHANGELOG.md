@@ -6,6 +6,16 @@ e il versioning segue [Semantic Versioning](https://semver.org/lang/it/).
 
 ---
 
+## [1.5.6] — 2026-09-30
+
+### Corretto
+- Ripristinato il corretto isolamento tra account UnipolSai: ogni config entry
+  usa ora una sessione HTTP Home Assistant dedicata e un proprio CookieJar.
+  Il login di un account non può più sovrascrivere i cookie di un altro e
+  provocare risposte `403` quando sono configurate polizze di account diversi.
+
+---
+
 ## [1.5.5] — 2026-09-30
 
 ### Corretto

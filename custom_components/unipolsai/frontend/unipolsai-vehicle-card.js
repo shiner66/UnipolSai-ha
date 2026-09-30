@@ -1,6 +1,6 @@
 /**
  * UnipolSai Vehicle Card — Lovelace Custom Card
- * Version: 1.5.5
+ * Version: 1.5.6
  * Leaflet 1.9.4, MapLibre GL JS 5.24.0 e adapter 0.1.4 bundled.
  *
  * Configurazione YAML:

@@ -9,7 +9,7 @@ from math import isfinite
 import aiohttp
 
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.aiohttp_client import async_create_clientsession
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .const import (
@@ -60,7 +60,12 @@ class UnipolSaiCoordinator(DataUpdateCoordinator):
         self.password = password
         self.targa = targa.upper().replace(" ", "")
         self._token = None
-        self._session = async_get_clientsession(hass)
+        # UnipolSai lega il JWT anche ai cookie creati durante il login.
+        # Ogni config entry deve quindi avere il proprio CookieJar: usare la
+        # sessione globale di Home Assistant farebbe interferire account diversi.
+        # Il connector resta condiviso e il cleanup è gestito automaticamente
+        # da Home Assistant quando l'entry viene scaricata.
+        self._session = async_create_clientsession(hass)
         self._normal_interval = timedelta(minutes=scan_interval)
         self._pending_since: float | None = None
         self._live_position_lock = asyncio.Lock()

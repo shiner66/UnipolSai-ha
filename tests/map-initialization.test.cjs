@@ -20,7 +20,7 @@ function loadCardClass() {
     .slice(source.indexOf('(function () {', source.indexOf(marker)))
     .replace(
       'const CARD_MODULE_URL = import.meta.url;',
-      "const CARD_MODULE_URL = 'https://example.test/unipolsai/1.5.5/unipolsai-vehicle-card.js';",
+      "const CARD_MODULE_URL = 'https://example.test/unipolsai/1.5.6/unipolsai-vehicle-card.js';",
     );
   const registry = new Map();
   const documentStub = {};
