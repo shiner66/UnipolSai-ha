@@ -6,6 +6,21 @@ e il versioning segue [Semantic Versioning](https://semver.org/lang/it/).
 
 ---
 
+## [1.5.4] — 2026-09-30
+
+### Modificato
+- Sostituito lo stile Liberty con Positron di OpenFreeMap per una mappa più
+  chiara e vicina all'aspetto predefinito di Home Assistant, mantenendo i nomi
+  delle strade, l'assenza di API key, l'attribuzione completa e il fallback
+  OpenTopoMap. Il precedente endpoint CARTO non viene ripristinato perché nel
+  frontend risponde con `API KEY REQUIRED` e non offre quindi un accesso
+  anonimo affidabile per la card.
+- Portato lo zoom predefinito da 15 a 16 per rendere subito visibili anche i
+  nomi delle strade minori nello stile Positron; le configurazioni `zoom`
+  esplicite continuano a essere rispettate.
+
+---
+
 ## [1.5.3] — 2026-09-30
 
 ### Corretto

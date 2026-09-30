@@ -1,6 +1,6 @@
 /**
  * UnipolSai Vehicle Card — Lovelace Custom Card
- * Version: 1.5.3
+ * Version: 1.5.4
  * Leaflet 1.9.4, MapLibre GL JS 5.24.0 e adapter 0.1.4 bundled.
  *
  * Configurazione YAML:
@@ -9,7 +9,7 @@
  *   vehicles:            # opzionale — lista veicoli con nome
  *     - targa: AB123CD
  *       name: Auto di Mario
- *   zoom: 15             # opzionale — livello di zoom iniziale (default: 15)
+ *   zoom: 16             # opzionale — livello di zoom iniziale (default: 16)
  *   height: 300          # opzionale — altezza mappa in px (default: 300)
  */
 
@@ -693,14 +693,14 @@ svg.leaflet-image-layer.leaflet-interactive path {
 	}
 `;
 
-  const CARD_VERSION = '1.5.3';
+  const CARD_VERSION = '1.5.4';
   const MAPLIBRE_VERSION = '5.24.0';
   const MAPLIBRE_ADAPTER_VERSION = '0.1.4';
   const VENDOR_URL = `/unipolsai/${CARD_VERSION}/vendor`;
   const MAPLIBRE_JS_URL = `${VENDOR_URL}/maplibre-gl.js`;
   const MAPLIBRE_CSS_URL = `${VENDOR_URL}/maplibre-gl.css`;
   const MAPLIBRE_ADAPTER_URL = `${VENDOR_URL}/leaflet-maplibre-gl.js`;
-  const MAP_STYLE_URL = 'https://tiles.openfreemap.org/styles/liberty';
+  const MAP_STYLE_URL = 'https://tiles.openfreemap.org/styles/positron';
   const MAP_ATTRIBUTION =
     '<a href="https://openfreemap.org/" target="_blank" rel="noopener noreferrer">OpenFreeMap</a> '
     + '<a href="https://www.openmaptiles.org/" target="_blank" rel="noopener noreferrer">&copy; OpenMapTiles</a> · '
@@ -1176,7 +1176,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
       container.appendChild(mapDiv);
 
       this._map = L.map(mapDiv, {
-        zoom: _configNumber(this._config?.zoom, 15, 1, 19),
+        zoom: _configNumber(this._config?.zoom, 16, 1, 19),
         zoomControl: true,
         attributionControl: true,
       });
@@ -1430,7 +1430,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
         // Click header → centra la mappa sul veicolo
         if (pos) {
           panel.querySelector('.vehicle-header').addEventListener('click', () => {
-            this._map?.setView(pos, _configNumber(this._config?.zoom, 15, 1, 19), { animate: true });
+            this._map?.setView(pos, _configNumber(this._config?.zoom, 16, 1, 19), { animate: true });
             if (this._markers[targa]) this._markers[targa].openPopup();
           });
         }
@@ -1461,7 +1461,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
       const boundsSignature = bounds.map(pos => pos.join(',')).join('|');
       if (boundsSignature !== this._lastBoundsSignature) {
         if (bounds.length === 1) {
-          this._map.setView(bounds[0], _configNumber(this._config?.zoom, 15, 1, 19), { animate: true });
+          this._map.setView(bounds[0], _configNumber(this._config?.zoom, 16, 1, 19), { animate: true });
         } else if (bounds.length > 1) {
           this._map.fitBounds(bounds, { padding: [50, 50], animate: true, maxZoom: 16 });
         }
