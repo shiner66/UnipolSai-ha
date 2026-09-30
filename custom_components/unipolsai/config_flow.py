@@ -1,4 +1,6 @@
 """Config flow e Options flow per UnipolSai."""
+import asyncio
+
 import voluptuous as vol
 import aiohttp
 
@@ -14,6 +16,8 @@ STEP_USER_DATA_SCHEMA = vol.Schema({
     vol.Optional("scan_interval", default=5): vol.All(int, vol.Range(min=1, max=60)),
 })
 
+LOGIN_TIMEOUT = aiohttp.ClientTimeout(total=15)
+
 
 async def _validate_credentials(username: str, password: str) -> None:
     """Verifica le credenziali eseguendo un login di prova."""
@@ -23,6 +27,7 @@ async def _validate_credentials(username: str, password: str) -> None:
             LOGIN_URL,
             headers=headers,
             data={"username": username, "password": password},
+            timeout=LOGIN_TIMEOUT,
         ) as resp:
             if resp.status != 200:
                 raise ValueError("invalid_auth")
@@ -49,7 +54,7 @@ class UnipolSaiConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 await _validate_credentials(user_input["username"], user_input["password"])
             except ValueError:
                 errors["base"] = "invalid_auth"
-            except aiohttp.ClientError:
+            except (aiohttp.ClientError, asyncio.TimeoutError):
                 errors["base"] = "cannot_connect"
             except Exception:
                 errors["base"] = "unknown"
@@ -80,13 +85,14 @@ class UnipolSaiOptionsFlow(config_entries.OptionsFlow):
     """Options flow: modifica le impostazioni senza reinstallare."""
 
     def __init__(self, config_entry):
-        self.config_entry = config_entry
+        """Conserva l'entry senza usare la property deprecata di HA."""
+        self._entry = config_entry
 
     async def async_step_init(self, user_input=None):
         if user_input is not None:
             return self.async_create_entry(title="", data=user_input)
 
-        current = self.config_entry.options or self.config_entry.data
+        current = self._entry.options or self._entry.data
         return self.async_show_form(
             step_id="init",
             data_schema=vol.Schema({

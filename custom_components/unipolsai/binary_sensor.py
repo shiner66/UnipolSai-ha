@@ -73,6 +73,7 @@ class UnipolSaiCarMovedSensor(_BaseBinary):
         self._attr_icon = "mdi:car-key"
         self._last_notified_id: str | None = None
         self._initialized: bool = False
+        self._attr_is_on = False
 
     async def async_added_to_hass(self) -> None:
         """Inizializza l'ID al caricamento per evitare falsi positivi con notifiche storiche."""
@@ -84,17 +85,18 @@ class UnipolSaiCarMovedSensor(_BaseBinary):
 
     @property
     def is_on(self) -> bool:
-        if not self._initialized:
-            return False
-        notif = self.coordinator.last_car_moved_notification
-        if not notif:
-            return False
-        return notif.get("id") != self._last_notified_id
+        return self._attr_is_on
 
     def _handle_coordinator_update(self) -> None:
         notif = self.coordinator.last_car_moved_notification
-        if notif:
-            self._last_notified_id = notif.get("id")
+        latest_id = notif.get("id") if notif else None
+        self._attr_is_on = bool(
+            self._initialized
+            and latest_id is not None
+            and latest_id != self._last_notified_id
+        )
+        if latest_id is not None:
+            self._last_notified_id = latest_id
         super()._handle_coordinator_update()
 
     @property
@@ -109,7 +111,11 @@ class UnipolSaiCarMovedSensor(_BaseBinary):
             "longitudine": lon,
             "velocita_kmh": notif.get("speed"),
             "accuratezza": notif.get("accuracy"),
-            "maps_url": f"https://www.google.com/maps?q={lat},{lon}" if lat and lon else None,
+            "maps_url": (
+                f"https://www.google.com/maps?q={lat},{lon}"
+                if lat is not None and lon is not None
+                else None
+            ),
         }
 
 
@@ -124,6 +130,7 @@ class UnipolSaiTargetAreaExitSensor(_BaseBinary):
         self._attr_icon = "mdi:map-marker-alert"
         self._last_notified_id: str | None = None
         self._initialized: bool = False
+        self._attr_is_on = False
 
     async def async_added_to_hass(self) -> None:
         """Inizializza l'ID al caricamento per evitare falsi positivi con notifiche storiche."""
@@ -135,17 +142,18 @@ class UnipolSaiTargetAreaExitSensor(_BaseBinary):
 
     @property
     def is_on(self) -> bool:
-        if not self._initialized:
-            return False
-        notif = self.coordinator.last_target_area_notification
-        if not notif:
-            return False
-        return notif.get("id") != self._last_notified_id
+        return self._attr_is_on
 
     def _handle_coordinator_update(self) -> None:
         notif = self.coordinator.last_target_area_notification
-        if notif:
-            self._last_notified_id = notif.get("id")
+        latest_id = notif.get("id") if notif else None
+        self._attr_is_on = bool(
+            self._initialized
+            and latest_id is not None
+            and latest_id != self._last_notified_id
+        )
+        if latest_id is not None:
+            self._last_notified_id = latest_id
         super()._handle_coordinator_update()
 
     @property
@@ -160,7 +168,11 @@ class UnipolSaiTargetAreaExitSensor(_BaseBinary):
             "latitudine_auto": lat,
             "longitudine_auto": lon,
             "velocita_kmh": notif.get("speed"),
-            "maps_url": f"https://www.google.com/maps?q={lat},{lon}" if lat and lon else None,
+            "maps_url": (
+                f"https://www.google.com/maps?q={lat},{lon}"
+                if lat is not None and lon is not None
+                else None
+            ),
             "zona_centro_lat": ta.get("lat"),
             "zona_centro_lon": ta.get("lon"),
             "zona_raggio_m": ta.get("radius"),

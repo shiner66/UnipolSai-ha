@@ -6,6 +6,42 @@ e il versioning segue [Semantic Versioning](https://semver.org/lang/it/).
 
 ---
 
+## [1.5.2] — 2026-09-30
+
+### Corretto
+- Sostituito l'endpoint CARTO che mostrava `API KEY REQUIRED` con le tile
+  standard OpenStreetMap: nessuna chiave richiesta, nomi di strade e località
+  visibili e attribuzione corretta.
+- La mappa valida ora coordinate e configurazione, rimuove i marker obsoleti,
+  libera le istanze Leaflet quando la card viene rimossa o riconfigurata e non
+  annulla più pan e zoom dell'utente a ogni aggiornamento di Home Assistant.
+- Sanitizzati nomi veicolo, targhe e indirizzi prima di inserirli nei popup e
+  nel pannello; il pulsante GPS viene disabilitato anche a crediti esauriti.
+- I binary sensor per auto spostata e uscita dalla zona ora segnalano davvero
+  il nuovo evento per un ciclo di aggiornamento, senza falsi positivi al riavvio.
+- Ripristinato il menu Opzioni sulle versioni Home Assistant 2025.12 e
+  successive; la modifica dell'intervallo di scansione ricarica ora l'entry.
+- Il periodo impostato con `set_usages_period` resta attivo nei poll successivi.
+- Il reverse geocoding aggiorna subito i listener anche dopo un fix GPS live,
+  accetta coordinate pari a zero e non invia più la targa nel `User-Agent`;
+  rimossi inoltre chiave contratto e numero polizza dai log.
+- Le richieste GPS live vengono serializzate e il pulsante si disabilita subito,
+  evitando che un doppio click consumi più crediti per lo stesso aggiornamento.
+- Le date di scadenza e prossima rata vengono normalizzate in valori `date`
+  validi per Home Assistant; corretti anche i link mappa con coordinate zero.
+
+### Modificato
+- Riutilizzata la sessione HTTP condivisa di Home Assistant e chiusi in modo
+  ordinato i task di polling/geocoding durante l'unload.
+- Registrazione della card compatibile sia con la vecchia API static path sia
+  con `StaticPathConfig`; rimossa dal manifest la chiave non valida
+  `homeassistant` (la versione minima resta dichiarata in `hacs.json`).
+- Il setup ripulisce coordinator e task se il caricamento delle piattaforme
+  fallisce o viene annullato; la card attende ora il frontend, così le
+  installazioni headless possono continuare a usare sensori e servizi.
+
+---
+
 ## [1.5.1] — 2026-03-27
 
 ### Corretto

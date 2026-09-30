@@ -62,7 +62,7 @@ Integrazione non ufficiale per Home Assistant che espone i dati della scatola ne
 
 L'integrazione include una **scheda Lovelace personalizzata** che mostra in un'unica vista:
 
-- 🗺️ **Mappa interattiva** (CartoDB Voyager) con marker per ogni veicolo
+- 🗺️ **Mappa interattiva** OpenStreetMap con nomi di strade e marker per ogni veicolo, senza API key
 - 🏷️ **Nome personalizzato** per ciascun veicolo (opzionale)
 - 🔋 **Crediti Car Finder rimanenti** oggi (es. `3/5 crediti`)
 - 🕐 **Timestamp ultimo aggiornamento GPS**
@@ -123,7 +123,7 @@ height: 350                # altezza della mappa in pixel (default: 300)
 | `vehicles[].targa` | stringa | — | Targa del veicolo (es. `AB123CD`) |
 | `vehicles[].name` | stringa | — | Nome leggibile del veicolo (opzionale) |
 | `targa` | stringa | — | Singola targa — backward compat, equivale a `vehicles` con un elemento senza nome |
-| `zoom` | intero | `15` | Livello di zoom iniziale della mappa (1–20) |
+| `zoom` | intero | `15` | Livello di zoom iniziale della mappa (1–19) |
 | `height` | intero | `300` | Altezza della mappa in pixel |
 
 > **Priorità config:** `vehicles` > `targa` singola > auto-discovery (se nessuno dei due è impostato)
@@ -143,7 +143,7 @@ height: 350                # altezza della mappa in pixel (default: 300)
 | **Pulsante Aggiorna** | Invia richiesta fix GPS live (consuma 1 credito) |
 | **Chip "Aggiornamento GPS…"** | Animato, visibile mentre il fix è in elaborazione |
 
-> **Nota:** La mappa richiede connessione internet per caricare le tiles CartoDB Voyager. In reti isolate la mappa potrebbe non essere disponibile.
+> **Nota:** La mappa richiede connessione internet per caricare le tile standard OpenStreetMap. Non è necessaria alcuna API key; in reti isolate la mappa potrebbe non essere disponibile.
 
 ---
 
@@ -274,7 +274,7 @@ automation:
 - I **crediti Car Finder** (max 5/giorno) vengono usati solo dal pulsante "Aggiorna posizione GPS". Il polling normale usa `update=false` e non li consuma
 - I **dati contratto** vengono aggiornati ogni ora, indipendentemente dall'intervallo di polling GPS
 - La **geocodifica inversa** usa Nominatim (OpenStreetMap) gratuitamente, senza API key
-- La **mappa** usa le tiles CartoDB Voyager; la libreria Leaflet 1.9.4 è bundled nel JS, nessun CDN richiesto
+- La **mappa** usa le tile standard OpenStreetMap, con nomi di strade e senza API key; la libreria Leaflet 1.9.4 è inclusa nel JS, senza dipendenze CDN
 - Gli **header dell'app** (`x-ibm-client-id`, ecc.) sono credenziali dell'applicazione mobile pubblica UnipolSai, non credenziali personali
 
 ---

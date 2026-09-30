@@ -1,14 +1,19 @@
 """Integrazione UnipolSai per Home Assistant."""
+import asyncio
 import logging
 from pathlib import Path
 import voluptuous as vol
 
 from homeassistant.components.frontend import add_extra_js_url
-from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.helpers import config_validation as cv
 from homeassistant.setup import async_when_setup
+
+try:
+    from homeassistant.components.http import StaticPathConfig
+except ImportError:  # Home Assistant < 2024.7
+    StaticPathConfig = None
 
 from .const import DOMAIN
 from .coordinator import UnipolSaiCoordinator
@@ -17,7 +22,7 @@ _LOGGER = logging.getLogger(__name__)
 
 PLATFORMS = ["device_tracker", "sensor", "button", "binary_sensor"]
 
-_VERSION = "1.5.1"
+_VERSION = "1.5.2"
 _CARD_URL = f"/{DOMAIN}/{_VERSION}/unipolsai-vehicle-card.js"
 _CARD_PATH = Path(__file__).parent / "frontend" / "unipolsai-vehicle-card.js"
 
@@ -73,14 +78,35 @@ async def _async_register_lovelace_resource(hass: HomeAssistant, _component: str
         _LOGGER.debug("UnipolSai: registrazione risorsa Lovelace non riuscita: %s", exc)
 
 
+async def _async_register_frontend_module(
+    hass: HomeAssistant, _component: str = ""
+) -> None:
+    """Registra la card solo dopo che il frontend ha inizializzato i suoi dati."""
+    add_extra_js_url(hass, _CARD_URL)
+
+
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     """Registra il percorso statico e inietta la Lovelace card nel frontend."""
-    await hass.http.async_register_static_paths([
-        StaticPathConfig(url_path=_CARD_URL, path=str(_CARD_PATH), cache_headers=False)
-    ])
+    if StaticPathConfig is not None:
+        await hass.http.async_register_static_paths([
+            StaticPathConfig(
+                url_path=_CARD_URL,
+                path=str(_CARD_PATH),
+                cache_headers=False,
+            )
+        ])
+    else:
+        # API sincrona usata dalle versioni HA precedenti a StaticPathConfig.
+        hass.http.register_static_path(
+            _CARD_URL,
+            str(_CARD_PATH),
+            cache_headers=False,
+        )
 
-    # Fallback per modalità YAML (lovelace non usa storage)
-    add_extra_js_url(hass, _CARD_URL)
+    # Fallback per modalità YAML (lovelace non usa storage). In installazioni
+    # headless il frontend può non essere caricato: in quel caso i sensori
+    # continuano a funzionare e la callback resta semplicemente in attesa.
+    async_when_setup(hass, "frontend", _async_register_frontend_module)
 
     # Registrazione affidabile via risorse Lovelace (storage mode).
     # async_when_setup chiama subito se lovelace è già pronto, altrimenti aspetta.
@@ -129,6 +155,11 @@ def _get_coordinators(hass: HomeAssistant, targa: str | None) -> list[UnipolSaiC
     return [c for c in all_coords if c.targa == targa_norm]
 
 
+async def _async_reload_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Ricarica l'entry quando cambiano le opzioni."""
+    await hass.config_entries.async_reload(entry.entry_id)
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Inizializza l'integrazione per un veicolo."""
     coordinator = UnipolSaiCoordinator(
@@ -139,9 +170,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         scan_interval=entry.options.get("scan_interval", entry.data.get("scan_interval", 5)),
     )
 
-    await coordinator.async_config_entry_first_refresh()
-    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
-    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    try:
+        await coordinator.async_config_entry_first_refresh()
+        hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
+        await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    except (asyncio.CancelledError, Exception):
+        hass.data.get(DOMAIN, {}).pop(entry.entry_id, None)
+        try:
+            await coordinator.async_close()
+        except Exception:  # Preserve the original setup error or cancellation.
+            _LOGGER.exception("UnipolSai: errore durante il rollback del setup")
+        raise
+    entry.async_on_unload(entry.add_update_listener(_async_reload_entry))
 
     # Registra i servizi solo la prima volta
     if not hass.services.has_service(DOMAIN, SERVICE_SET_TARGET_AREA):

@@ -1,6 +1,6 @@
 /**
  * UnipolSai Vehicle Card — Lovelace Custom Card
- * Version: 1.5.0
+ * Version: 1.5.2
  * Leaflet 1.9.4 bundled (no CDN required).
  *
  * Configurazione YAML:
@@ -693,7 +693,10 @@ svg.leaflet-image-layer.leaflet-interactive path {
 	}
 `;
 
-  const CARD_VERSION = '1.5.1';
+  const CARD_VERSION = '1.5.2';
+  const MAP_TILE_URL = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
+  const MAP_ATTRIBUTION =
+    '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">OpenStreetMap</a> contributors';
 
   // ── Leaflet loader (bundled — nessun CDN) ────────────────────────────────
   let _leafletPromise = null;
@@ -720,6 +723,37 @@ svg.leaflet-image-layer.leaflet-interactive path {
       .replace(/^_|_$/g, '');
   }
 
+  function _escapeHtml(value) {
+    const escapes = {
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+    };
+    return String(value ?? '').replace(/[&<>"']/g, char => escapes[char]);
+  }
+
+  function _coordinatePair(tracker) {
+    const rawLat = tracker?.attributes?.latitude;
+    const rawLon = tracker?.attributes?.longitude;
+    if (rawLat === null || rawLat === undefined
+        || (typeof rawLat === 'string' && rawLat.trim() === '')
+        || rawLon === null || rawLon === undefined
+        || (typeof rawLon === 'string' && rawLon.trim() === '')) return null;
+    const lat = Number(rawLat);
+    const lon = Number(rawLon);
+    if (
+      !Number.isFinite(lat) || !Number.isFinite(lon)
+      || lat < -90 || lat > 90 || lon < -180 || lon > 180
+    ) return null;
+    return [lat, lon];
+  }
+
+  function _configNumber(value, fallback, min, max) {
+    if (value === null || value === undefined
+        || (typeof value === 'string' && value.trim() === '')) return fallback;
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) return fallback;
+    return Math.min(max, Math.max(min, parsed));
+  }
+
   /**
    * Costruisce gli entity_id a partire dalla targa.
    * Rispecchia la nomenclatura usata dall'integrazione Python:
@@ -742,6 +776,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
     if (!isoStr || isoStr === 'unknown' || isoStr === 'unavailable') return '—';
     try {
       const d = new Date(isoStr);
+      if (Number.isNaN(d.getTime())) return '—';
       return d.toLocaleString('it-IT', {
         day: '2-digit', month: '2-digit',
         hour: '2-digit', minute: '2-digit',
@@ -906,6 +941,9 @@ svg.leaflet-image-layer.leaflet-interactive path {
       this._vehicles = [];      // targas to show
       this._initializing = false;
       this._ready = false;
+      this._generation = 0;
+      this._invalidateTimer = null;
+      this._lastBoundsSignature = null;
     }
 
     // HA chiama questo per la configurazione di default nel visual editor
@@ -915,29 +953,25 @@ svg.leaflet-image-layer.leaflet-interactive path {
 
     setConfig(config) {
       if (!config) throw new Error('Configurazione mancante');
+      this._destroyMap();
       this._config = config;
       if (config.vehicles && Array.isArray(config.vehicles)) {
         this._vehicles = config.vehicles
           .filter(v => v && v.targa)
-          .map(v => ({ targa: String(v.targa).toUpperCase(), name: v.name || null }));
+          .map(v => ({ targa: String(v.targa).trim().toUpperCase(), name: v.name || null }));
       } else if (config.targa) {
-        this._vehicles = [{ targa: String(config.targa).toUpperCase(), name: null }];
+        this._vehicles = [{ targa: String(config.targa).trim().toUpperCase(), name: null }];
       } else {
         this._vehicles = [];
       }
-      // Reset al cambio config
-      if (this._ready) {
-        this._ready = false;
-        this._initializing = false;
-        this._map = null;
-        this._L = null;
-        this._markers = {};
-      }
+      if (this._vehicles.length === 0) this.shadowRoot.replaceChildren();
     }
 
     set hass(hass) {
       this._hass = hass;
-      if (!this._config?.targa && !this._config?.vehicles) {
+      const hasConfiguredVehicles = Array.isArray(this._config?.vehicles)
+        && this._config.vehicles.some(vehicle => vehicle?.targa);
+      if (!this._config?.targa && !hasConfiguredVehicles) {
         this._autoDiscover();
       }
       if (!this._ready && !this._initializing && this._vehicles.length > 0) {
@@ -948,6 +982,46 @@ svg.leaflet-image-layer.leaflet-interactive path {
     }
 
     get hass() { return this._hass; }
+
+    connectedCallback() {
+      if (this._hass && this._config && this._vehicles.length > 0
+          && !this._ready && !this._initializing) {
+        this._init();
+      }
+    }
+
+    disconnectedCallback() {
+      this._destroyMap();
+    }
+
+    _destroyMap() {
+      this._generation += 1;
+      if (this._invalidateTimer !== null) {
+        clearTimeout(this._invalidateTimer);
+        this._invalidateTimer = null;
+      }
+      if (this._map) {
+        try {
+          this._map.remove();
+        } catch (_) {
+          // La mappa può essere già stata rimossa insieme allo shadow DOM.
+        }
+      }
+      this._map = null;
+      this._L = null;
+      this._markers = {};
+      this._lastBoundsSignature = null;
+      this._ready = false;
+      this._initializing = false;
+    }
+
+    _scheduleInvalidate(delay = 100) {
+      if (this._invalidateTimer !== null) clearTimeout(this._invalidateTimer);
+      this._invalidateTimer = setTimeout(() => {
+        this._invalidateTimer = null;
+        if (this._map) this._map.invalidateSize();
+      }, delay);
+    }
 
     /** Rileva automaticamente i veicoli UnipolSai cercando il pattern targa nell'attributo. */
     _autoDiscover() {
@@ -975,26 +1049,22 @@ svg.leaflet-image-layer.leaflet-interactive path {
       const found = foundTargas.map(t => ({ targa: t, name: null }));
       const curTargas = this._vehicles.map(v => v.targa);
       if (JSON.stringify(foundTargas) !== JSON.stringify(curTargas)) {
+        if (this._ready || this._initializing || this._map) this._destroyMap();
         this._vehicles = found;
-        // Se cambia il numero di veicoli, re-init
-        if (this._ready) {
-          this._ready = false;
-          this._initializing = false;
-          this._map = null;
-          this._L = null;
-          this._markers = {};
-        }
+        if (found.length === 0) this.shadowRoot.replaceChildren();
       }
     }
 
     async _init() {
       if (this._initializing || this._vehicles.length === 0) return;
       this._initializing = true;
+      const generation = this._generation;
 
       this._renderSkeleton();
 
       try {
         const L = await _loadLeaflet();
+        if (generation !== this._generation) return;
         this._L = L;
         // Inietta CSS Leaflet nel shadow root (bundled)
         if (!this.shadowRoot.querySelector('style[data-leaflet]')) {
@@ -1007,14 +1077,16 @@ svg.leaflet-image-layer.leaflet-interactive path {
         this._ready = true;
         this._update();
       } catch (e) {
-        this._showMapError(`Mappa non disponibile: ${e.message}<br><small>Verifica la connessione internet.</small>`);
+        if (generation === this._generation) {
+          this._showMapError(`Mappa non disponibile: ${e.message}. Verifica la connessione internet.`);
+        }
       } finally {
-        this._initializing = false;
+        if (generation === this._generation) this._initializing = false;
       }
     }
 
     _renderSkeleton() {
-      const mapH = this._config?.height ?? 300;
+      const mapH = _configNumber(this._config?.height, 300, 120, 1000);
       const root = this.shadowRoot;
       root.innerHTML = `
         <style>${STYLES}</style>
@@ -1041,19 +1113,18 @@ svg.leaflet-image-layer.leaflet-interactive path {
       container.appendChild(mapDiv);
 
       this._map = L.map(mapDiv, {
-        zoom: this._config?.zoom ?? 15,
+        zoom: _configNumber(this._config?.zoom, 15, 1, 19),
         zoomControl: true,
         attributionControl: true,
       });
 
-      L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
-        attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> © <a href="https://carto.com/attributions">CARTO</a>',
-        subdomains: 'abcd',
-        maxZoom: 20,
+      L.tileLayer(MAP_TILE_URL, {
+        attribution: MAP_ATTRIBUTION,
+        maxZoom: 19,
       }).addTo(this._map);
 
       // Forza ridimensionamento dopo init
-      setTimeout(() => { if (this._map) this._map.invalidateSize(); }, 250);
+      this._scheduleInvalidate(250);
     }
 
     _update() {
@@ -1065,6 +1136,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 
       infoEl.innerHTML = '';
       const bounds = [];
+      const activeTargas = new Set(this._vehicles.map(vehicle => vehicle.targa));
 
       for (const vehicle of this._vehicles) {
         const targa = vehicle.targa;
@@ -1078,8 +1150,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
         const addrSt     = hass.states[ids.address];
         const speedSt    = hass.states[ids.speed];
 
-        const lat        = tracker?.attributes?.latitude;
-        const lon        = tracker?.attributes?.longitude;
+        const pos        = _coordinatePair(tracker);
         const address    = _safeState(addrSt?.state)
                         ?? _safeState(tracker?.attributes?.indirizzo)
                         ?? '';
@@ -1088,12 +1159,16 @@ svg.leaflet-image-layer.leaflet-interactive path {
         const lastUpd    = _safeState(updSt?.state);
         const speed      = _safeState(speedSt?.state);
         const isPending  = pendSt?.state === 'on';
-        const credNum    = credits !== null ? parseInt(credits, 10) : null;
-        const btnDisabled = !btnSt || btnSt.state === 'unavailable' || isPending;
+        const parsedCredits = credits !== null ? Number.parseInt(credits, 10) : NaN;
+        const credNum    = Number.isFinite(parsedCredits) ? parsedCredits : null;
+        const btnDisabled = !btnSt
+          || btnSt.state === 'unavailable'
+          || btnSt.state === 'unknown'
+          || isPending
+          || (credNum !== null && credNum <= 0);
 
         // ── Aggiorna marker sulla mappa ──────────────────────────────────
-        if (lat != null && lon != null) {
-          const pos = [lat, lon];
+        if (pos) {
           bounds.push(pos);
           const isMoving = speed !== null && parseFloat(speed) > 0;
           const icon = _carIcon(L, isMoving, isPending);
@@ -1101,19 +1176,22 @@ svg.leaflet-image-layer.leaflet-interactive path {
           if (this._markers[targa]) {
             this._markers[targa].setLatLng(pos).setIcon(icon);
             const popupContent = vehicleName
-              ? `<b>${vehicleName}</b><br><span style="font-size:0.85em;opacity:0.75">${targa}</span>${address ? '<br>' + address : ''}`
-              : `<b>${targa}</b>${address ? '<br>' + address : ''}`;
+              ? `<b>${_escapeHtml(vehicleName)}</b><br><span style="font-size:0.85em;opacity:0.75">${_escapeHtml(targa)}</span>${address ? '<br>' + _escapeHtml(address) : ''}`
+              : `<b>${_escapeHtml(targa)}</b>${address ? '<br>' + _escapeHtml(address) : ''}`;
             this._markers[targa]
               .getPopup()
               ?.setContent(popupContent);
           } else {
             const popupContentNew = vehicleName
-              ? `<b>${vehicleName}</b><br><span style="font-size:0.85em;opacity:0.75">${targa}</span>${address ? '<br>' + address : ''}`
-              : `<b>${targa}</b>${address ? '<br>' + address : ''}`;
+              ? `<b>${_escapeHtml(vehicleName)}</b><br><span style="font-size:0.85em;opacity:0.75">${_escapeHtml(targa)}</span>${address ? '<br>' + _escapeHtml(address) : ''}`
+              : `<b>${_escapeHtml(targa)}</b>${address ? '<br>' + _escapeHtml(address) : ''}`;
             this._markers[targa] = L.marker(pos, { icon })
               .addTo(this._map)
               .bindPopup(popupContentNew);
           }
+        } else if (this._markers[targa]) {
+          this._map.removeLayer(this._markers[targa]);
+          delete this._markers[targa];
         }
 
         // ── Chip crediti ─────────────────────────────────────────────────
@@ -1125,10 +1203,11 @@ svg.leaflet-image-layer.leaflet-interactive path {
         }
 
         // ── Panel HTML ───────────────────────────────────────────────────
-        const speedChip = speed !== null
+        const speedNum = speed !== null ? Number.parseFloat(speed) : NaN;
+        const speedChip = Number.isFinite(speedNum)
           ? `<span class="chip">
                <ha-icon icon="mdi:speedometer"></ha-icon>
-               ${parseFloat(speed).toFixed(0)} km/h
+               ${speedNum.toFixed(0)} km/h
              </span>`
           : '';
 
@@ -1142,21 +1221,21 @@ svg.leaflet-image-layer.leaflet-interactive path {
         const panel = document.createElement('div');
         panel.className = 'vehicle-panel';
         panel.innerHTML = `
-          <div class="vehicle-header" title="Centra mappa su ${targa}">
+          <div class="vehicle-header" title="Centra mappa su ${_escapeHtml(targa)}">
             <ha-icon icon="mdi:car"></ha-icon>
             ${vehicleName
-              ? `<span class="vehicle-name">${vehicleName}</span><span class="targa-badge">${targa}</span>`
-              : `<span class="targa-badge">${targa}</span>`}
-            <span class="address-text">${address || 'Posizione non disponibile'}</span>
+              ? `<span class="vehicle-name">${_escapeHtml(vehicleName)}</span><span class="targa-badge">${_escapeHtml(targa)}</span>`
+              : `<span class="targa-badge">${_escapeHtml(targa)}</span>`}
+            <span class="address-text">${_escapeHtml(address || 'Posizione non disponibile')}</span>
           </div>
           <div class="stats-row">
             <span class="chip ${credClass}">
               <ha-icon icon="mdi:credit-card-check-outline"></ha-icon>
-              ${credLabel}
+              ${_escapeHtml(credLabel)}
             </span>
             <span class="chip">
               <ha-icon icon="mdi:clock-outline"></ha-icon>
-              ${_fmtDatetime(lastUpd)}
+              ${_escapeHtml(_fmtDatetime(lastUpd))}
             </span>
             ${speedChip}
             ${pendingChip}
@@ -1168,42 +1247,65 @@ svg.leaflet-image-layer.leaflet-interactive path {
         `;
 
         // Click header → centra la mappa sul veicolo
-        if (lat != null && lon != null) {
+        if (pos) {
           panel.querySelector('.vehicle-header').addEventListener('click', () => {
-            this._map.setView([lat, lon], this._config?.zoom ?? 15, { animate: true });
+            this._map?.setView(pos, _configNumber(this._config?.zoom, 15, 1, 19), { animate: true });
             if (this._markers[targa]) this._markers[targa].openPopup();
           });
         }
 
         // Click button → press dell'entità button
-        panel.querySelector('.btn-update').addEventListener('click', () => {
-          if (!btnDisabled) this._pressButton(ids.button);
+        const updateButton = panel.querySelector('.btn-update');
+        updateButton.addEventListener('click', () => {
+          if (btnDisabled || updateButton.disabled) return;
+          updateButton.disabled = true;
+          Promise.resolve(this._pressButton(ids.button))
+            .catch(error => console.error('UnipolSai: richiesta GPS fallita', error))
+            .finally(() => {
+              if (updateButton.isConnected) updateButton.disabled = false;
+            });
         });
 
         infoEl.appendChild(panel);
       }
 
-      // ── Adatta vista mappa ───────────────────────────────────────────────
-      if (bounds.length === 1) {
-        this._map.setView(bounds[0], this._config?.zoom ?? 15, { animate: true });
-      } else if (bounds.length > 1) {
-        this._map.fitBounds(bounds, { padding: [50, 50], animate: true, maxZoom: 16 });
+      for (const [targa, marker] of Object.entries(this._markers)) {
+        if (!activeTargas.has(targa)) {
+          this._map.removeLayer(marker);
+          delete this._markers[targa];
+        }
       }
-      setTimeout(() => { if (this._map) this._map.invalidateSize(); }, 100);
+
+      // ── Adatta vista mappa ───────────────────────────────────────────────
+      const boundsSignature = bounds.map(pos => pos.join(',')).join('|');
+      if (boundsSignature !== this._lastBoundsSignature) {
+        if (bounds.length === 1) {
+          this._map.setView(bounds[0], _configNumber(this._config?.zoom, 15, 1, 19), { animate: true });
+        } else if (bounds.length > 1) {
+          this._map.fitBounds(bounds, { padding: [50, 50], animate: true, maxZoom: 16 });
+        }
+        this._lastBoundsSignature = boundsSignature;
+      }
+      this._scheduleInvalidate();
     }
 
     _pressButton(entityId) {
-      if (!this._hass) return;
-      this._hass.callService('button', 'press', { entity_id: entityId });
+      if (!this._hass) return Promise.resolve();
+      return this._hass.callService('button', 'press', { entity_id: entityId });
     }
 
-    _showMapError(html) {
+    _showMapError(message) {
       const container = this.shadowRoot?.getElementById('map-container');
-      if (container) container.innerHTML = `<div class="map-error">⚠️ ${html}</div>`;
+      if (!container) return;
+      container.innerHTML = '';
+      const error = document.createElement('div');
+      error.className = 'map-error';
+      error.textContent = `⚠️ ${message}`;
+      container.appendChild(error);
     }
 
     getCardSize() {
-      const mapH = this._config?.height ?? 300;
+      const mapH = _configNumber(this._config?.height, 300, 120, 1000);
       return Math.ceil(mapH / 50) + this._vehicles.length * 3;
     }
   }

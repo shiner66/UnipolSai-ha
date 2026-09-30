@@ -2,11 +2,14 @@
 import logging
 import asyncio
 import time
+from contextlib import suppress
 from datetime import timedelta, datetime
+from math import isfinite
 
 import aiohttp
 
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .const import (
@@ -37,6 +40,10 @@ FAST_POLL_INTERVAL = timedelta(seconds=10)
 PENDING_TIMEOUT = 300
 CONTRACT_REFRESH_INTERVAL = 3600  # 1 ora
 GEOCODE_CACHE_DISTANCE = 0.001    # ~100m: non ri-geocodifica se ci si sposta poco
+NOMINATIM_USER_AGENT = (
+    "HomeAssistant-UnipolSai/1.0 "
+    "(+https://github.com/shiner66/UnipolSai-ha)"
+)
 
 
 class UnipolSaiCoordinator(DataUpdateCoordinator):
@@ -53,10 +60,13 @@ class UnipolSaiCoordinator(DataUpdateCoordinator):
         self.password = password
         self.targa = targa.upper().replace(" ", "")
         self._token = None
-        self._session: aiohttp.ClientSession | None = None
+        self._session = async_get_clientsession(hass)
         self._normal_interval = timedelta(minutes=scan_interval)
         self._pending_since: float | None = None
+        self._live_position_lock = asyncio.Lock()
         self._fast_polling_task: asyncio.Task | None = None
+        self._geocode_task: asyncio.Task | None = None
+        self._closed = False
 
         # Notifiche
         self._last_seen_car_moved_id: str | None = None
@@ -80,6 +90,8 @@ class UnipolSaiCoordinator(DataUpdateCoordinator):
 
         # Statistiche uso
         self.vehicle_usages: dict | None = None
+        self._usages_start_date: int | None = None
+        self._usages_end_date: int | None = None
 
         # Reverse geocoding
         self.geocoded_address: str | None = None
@@ -98,8 +110,6 @@ class UnipolSaiCoordinator(DataUpdateCoordinator):
     # ------------------------------------------------------------------
 
     async def _get_session(self) -> aiohttp.ClientSession:
-        if self._session is None or self._session.closed:
-            self._session = aiohttp.ClientSession()
         return self._session
 
     # ------------------------------------------------------------------
@@ -168,7 +178,7 @@ class UnipolSaiCoordinator(DataUpdateCoordinator):
             async with session.get(
                 NOMINATIM_URL,
                 params={"lat": lat, "lon": lon, "format": "json", "accept-language": "it"},
-                headers={"User-Agent": f"HomeAssistant-UnipolSai/{self.targa}"},
+                headers={"User-Agent": NOMINATIM_USER_AGENT},
                 timeout=aiohttp.ClientTimeout(total=5),
             ) as resp:
                 if resp.status != 200:
@@ -231,15 +241,43 @@ class UnipolSaiCoordinator(DataUpdateCoordinator):
                 segments = [s.strip() for s in display.split(",")]
                 address = ", ".join(segments[:3]) if segments else display
 
+            address_changed = address != self.geocoded_address
             self._last_geocoded_lat = lat
             self._last_geocoded_lon = lon
             self.geocoded_address = address
+            if address_changed and not self._closed:
+                self.async_update_listeners()
             _LOGGER.debug("UnipolSai: geocoding %s,%s → %s", lat, lon, address)
             return address
 
         except Exception as err:
             _LOGGER.debug("UnipolSai: reverse geocoding fallito: %s", err)
             return None
+
+    def _schedule_reverse_geocode(self, position: dict) -> None:
+        """Avvia il reverse geocoding per una posizione GPS valida."""
+        if self._closed:
+            return
+
+        try:
+            lat = float(position.get("lat"))
+            lon = float(position.get("lon"))
+        except (TypeError, ValueError):
+            return
+
+        if not (
+            isfinite(lat)
+            and isfinite(lon)
+            and -90 <= lat <= 90
+            and -180 <= lon <= 180
+        ):
+            return
+
+        if self._geocode_task and not self._geocode_task.done():
+            self._geocode_task.cancel()
+        self._geocode_task = self.hass.async_create_task(
+            self._reverse_geocode(lat, lon)
+        )
 
     # ------------------------------------------------------------------
     # Notifiche
@@ -498,7 +536,9 @@ class UnipolSaiCoordinator(DataUpdateCoordinator):
                         break
 
                 if not polizza_raw:
-                    _LOGGER.warning("UnipolSai contratto: targa %s non trovata in /me/polizze", self.targa)
+                    _LOGGER.warning(
+                        "UnipolSai contratto: veicolo configurato non trovato in /me/polizze"
+                    )
                     return None
 
                 # ----------------------------------------------------------
@@ -548,19 +588,16 @@ class UnipolSaiCoordinator(DataUpdateCoordinator):
                     "ruoloContraente": str(polizza_raw.get("ruoloContraente", "1001")),
                     "comparto": str(polizza_raw.get("comparto", "1001")),
                 }
-                _LOGGER.info(
-                    "UnipolSai contratto: chiave=%s polizza=%s scadenza=%s",
-                    self._chiave_contratto,
-                    polizza_raw.get("polizza"),
-                    scadenza_str,
-                )
+                _LOGGER.info("UnipolSai contratto: dati contratto individuati")
 
             except Exception as err:
                 _LOGGER.warning("UnipolSai contratto: errore discovery: %s", err)
                 return None
 
         if not self._chiave_contratto:
-            _LOGGER.warning("UnipolSai contratto: chiaveContratto non trovata per targa %s", self.targa)
+            _LOGGER.warning(
+                "UnipolSai contratto: chiaveContratto non trovata per il veicolo configurato"
+            )
             return None
 
         # ------------------------------------------------------------------
@@ -588,8 +625,8 @@ class UnipolSaiCoordinator(DataUpdateCoordinator):
                         result = await r2.json(content_type=None)
                 elif resp.status != 200:
                     _LOGGER.warning(
-                        "UnipolSai contratto: dettaglio HTTP %d chiave=%s",
-                        resp.status, self._chiave_contratto,
+                        "UnipolSai contratto: dettaglio HTTP %d",
+                        resp.status,
                     )
                     return None
                 else:
@@ -689,6 +726,8 @@ class UnipolSaiCoordinator(DataUpdateCoordinator):
 
         usages = await self._fetch_vehicle_usages(start_date=start_ts, end_date=end_ts)
         if usages is not None:
+            self._usages_start_date = start_ts
+            self._usages_end_date = end_ts
             self.vehicle_usages = usages
             self.async_update_listeners()
             _LOGGER.info(
@@ -703,13 +742,35 @@ class UnipolSaiCoordinator(DataUpdateCoordinator):
     # ------------------------------------------------------------------
 
     async def async_request_live_position(self) -> None:
-        await self._ensure_token()
-        position = await self._fetch_position(force_update=True)
-        self.async_set_updated_data(position)
-        if position.get("pendingRequest"):
-            self._start_fast_polling()
+        async with self._live_position_lock:
+            if self._closed:
+                return
+            if self.is_pending:
+                _LOGGER.debug(
+                    "UnipolSai: richiesta GPS ignorata, aggiornamento già in corso"
+                )
+                return
+            credits = self.available_credits
+            if credits is not None and credits <= 0:
+                _LOGGER.warning(
+                    "UnipolSai: richiesta GPS ignorata, crediti esauriti"
+                )
+                return
+
+            await self._ensure_token()
+            if self._closed:
+                return
+            position = await self._fetch_position(force_update=True)
+            if self._closed:
+                return
+            self.async_set_updated_data(position)
+            self._schedule_reverse_geocode(position)
+            if position.get("pendingRequest"):
+                self._start_fast_polling()
 
     def _start_fast_polling(self) -> None:
+        if self._closed:
+            return
         self._pending_since = time.monotonic()
         if self._fast_polling_task and not self._fast_polling_task.done():
             self._fast_polling_task.cancel()
@@ -726,6 +787,7 @@ class UnipolSaiCoordinator(DataUpdateCoordinator):
                 await self._ensure_token()
                 position = await self._fetch_position(force_update=False)
                 self.async_set_updated_data(position)
+                self._schedule_reverse_geocode(position)
                 if not position.get("pendingRequest", False):
                     self._pending_since = None
                     break
@@ -755,7 +817,10 @@ class UnipolSaiCoordinator(DataUpdateCoordinator):
                 self._fetch_target_area(),
                 self._fetch_speed_limit(),
                 self._fetch_contract_data(),
-                self._fetch_vehicle_usages(),  # default: inizio contratto → oggi
+                self._fetch_vehicle_usages(
+                    start_date=self._usages_start_date,
+                    end_date=self._usages_end_date,
+                ),
                 self._check_car_moved_notifications(),
                 self._check_target_area_notifications(),
                 self._check_speed_limit_notifications(),
@@ -771,10 +836,7 @@ class UnipolSaiCoordinator(DataUpdateCoordinator):
                 self.vehicle_usages = usages
 
             # Reverse geocoding in background (non blocca l'update)
-            lat = position.get("lat")
-            lon = position.get("lon")
-            if lat and lon:
-                self.hass.async_create_task(self._reverse_geocode(lat, lon))
+            self._schedule_reverse_geocode(position)
 
             return position
         except UpdateFailed:
@@ -825,7 +887,14 @@ class UnipolSaiCoordinator(DataUpdateCoordinator):
         return datetime.fromtimestamp(ts_ms / 1000).strftime("%d/%m/%Y %H:%M:%S")
 
     async def async_close(self):
+        self._closed = True
         if self._fast_polling_task and not self._fast_polling_task.done():
             self._fast_polling_task.cancel()
-        if self._session and not self._session.closed:
-            await self._session.close()
+            with suppress(asyncio.CancelledError):
+                await self._fast_polling_task
+        self._fast_polling_task = None
+        if self._geocode_task and not self._geocode_task.done():
+            self._geocode_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await self._geocode_task
+        self._geocode_task = None

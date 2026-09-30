@@ -20,6 +20,32 @@ DIREZIONE_MAP = {
 }
 
 
+def _parse_contract_date(value) -> date | None:
+    """Converti le date contratto note in un valore valido per HA."""
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    if not isinstance(value, str) or not value.strip():
+        return None
+
+    text = value.strip()
+    try:
+        return date.fromisoformat(text)
+    except ValueError:
+        pass
+    try:
+        return datetime.fromisoformat(text.replace("Z", "+00:00")).date()
+    except ValueError:
+        pass
+    for fmt in ("%d/%m/%Y", "%d-%m-%Y"):
+        try:
+            return datetime.strptime(text, fmt).date()
+        except ValueError:
+            continue
+    return None
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback):
     coordinator: UnipolSaiCoordinator = hass.data[DOMAIN][entry.entry_id]
     async_add_entities([
@@ -212,7 +238,11 @@ class UnipolSaiTargetAreaStatusSensor(_BaseSensor):
             "latitudine": lat,
             "longitudine": lon,
             "raggio_m": ta.get("radius"),
-            "maps_url": f"https://www.google.com/maps?q={lat},{lon}" if lat and lon else None,
+            "maps_url": (
+                f"https://www.google.com/maps?q={lat},{lon}"
+                if lat is not None and lon is not None
+                else None
+            ),
         }
 
 
@@ -273,23 +303,12 @@ class UnipolSaiContractExpirySensor(_ContractBaseSensor):
 
     @property
     def native_value(self):
-        val = self._cd.get("data_scadenza")
-        if val:
-            try:
-                return datetime.strptime(val, "%Y-%m-%d").date()
-            except (ValueError, TypeError):
-                return val
-        return None
+        return _parse_contract_date(self._cd.get("data_scadenza"))
 
     @property
     def extra_state_attributes(self) -> dict:
-        val = self._cd.get("data_scadenza")
-        giorni = None
-        if val:
-            try:
-                giorni = (datetime.strptime(val, "%Y-%m-%d").date() - date.today()).days
-            except (ValueError, TypeError):
-                pass
+        expiry = _parse_contract_date(self._cd.get("data_scadenza"))
+        giorni = (expiry - date.today()).days if expiry is not None else None
         return {
             "data_effetto": self._cd.get("data_effetto"),
             "giorni_alla_scadenza": giorni,
@@ -327,13 +346,7 @@ class UnipolSaiNextRataSensor(_ContractBaseSensor):
 
     @property
     def native_value(self):
-        val = self._cd.get("prossima_rata")
-        if val:
-            try:
-                return datetime.strptime(val, "%Y-%m-%d").date()
-            except (ValueError, TypeError):
-                return val
-        return None
+        return _parse_contract_date(self._cd.get("prossima_rata"))
 
 
 # ==============================================================
