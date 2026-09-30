@@ -1,6 +1,6 @@
 /**
  * UnipolSai Vehicle Card — Lovelace Custom Card
- * Version: 1.5.4
+ * Version: 1.5.5
  * Leaflet 1.9.4, MapLibre GL JS 5.24.0 e adapter 0.1.4 bundled.
  *
  * Configurazione YAML:
@@ -693,13 +693,22 @@ svg.leaflet-image-layer.leaflet-interactive path {
 	}
 `;
 
-  const CARD_VERSION = '1.5.4';
+  const CARD_MODULE_URL = import.meta.url;
+  const CARD_VERSION = (() => {
+    try {
+      const match = new URL(CARD_MODULE_URL).pathname.match(
+        /\/unipolsai\/([^/]+)\/unipolsai-vehicle-card\.js$/,
+      );
+      return match ? decodeURIComponent(match[1]) : 'unknown';
+    } catch (_) {
+      return 'unknown';
+    }
+  })();
   const MAPLIBRE_VERSION = '5.24.0';
   const MAPLIBRE_ADAPTER_VERSION = '0.1.4';
-  const VENDOR_URL = `/unipolsai/${CARD_VERSION}/vendor`;
-  const MAPLIBRE_JS_URL = `${VENDOR_URL}/maplibre-gl.js`;
-  const MAPLIBRE_CSS_URL = `${VENDOR_URL}/maplibre-gl.css`;
-  const MAPLIBRE_ADAPTER_URL = `${VENDOR_URL}/leaflet-maplibre-gl.js`;
+  const MAPLIBRE_JS_URL = new URL('./vendor/maplibre-gl.js', CARD_MODULE_URL).href;
+  const MAPLIBRE_CSS_URL = new URL('./vendor/maplibre-gl.css', CARD_MODULE_URL).href;
+  const MAPLIBRE_ADAPTER_URL = new URL('./vendor/leaflet-maplibre-gl.js', CARD_MODULE_URL).href;
   const MAP_STYLE_URL = 'https://tiles.openfreemap.org/styles/positron';
   const MAP_ATTRIBUTION =
     '<a href="https://openfreemap.org/" target="_blank" rel="noopener noreferrer">OpenFreeMap</a> '
@@ -985,6 +994,8 @@ svg.leaflet-image-layer.leaflet-interactive path {
 
   // ── Main Card Class ────────────────────────────────────────────────────────
   class UnipolSaiVehicleCard extends HTMLElement {
+    static unipolsaiCardVersion = CARD_VERSION;
+
     constructor() {
       super();
       this.attachShadow({ mode: 'open' });
@@ -1175,12 +1186,24 @@ svg.leaflet-image-layer.leaflet-interactive path {
       mapDiv.style.cssText = 'width:100%;height:100%;';
       container.appendChild(mapDiv);
 
+      const configuredZoom = _configNumber(this._config?.zoom, 16, 1, 19);
+      let initialCenter = null;
+      for (const vehicle of this._vehicles) {
+        const tracker = this._hass?.states?.[_entityIds(vehicle.targa).tracker];
+        initialCenter = _coordinatePair(tracker);
+        if (initialCenter) break;
+      }
+
       this._map = L.map(mapDiv, {
-        zoom: _configNumber(this._config?.zoom, 16, 1, 19),
+        zoom: configuredZoom,
         zoomControl: true,
         attributionControl: true,
       });
 
+      // L'adapter MapLibre accede subito a getCenter()/getZoom() quando viene
+      // aggiunto. Inizializza quindi la vista Leaflet prima del layer: senza
+      // setView(), addTo() resta in attesa e viene scambiato per un errore.
+      this._map.setView(initialCenter || [0, 0], initialCenter ? configuredZoom : 2);
       this._addVectorLayer(L);
 
       // Forza ridimensionamento dopo init
@@ -1504,8 +1527,21 @@ svg.leaflet-image-layer.leaflet-interactive path {
   }
 
   // ── Registrazione ──────────────────────────────────────────────────────────
-  if (!customElements.get('unipolsai-vehicle-card')) {
+  const registeredUnipolSaiCard = customElements.get('unipolsai-vehicle-card');
+  if (!registeredUnipolSaiCard) {
     customElements.define('unipolsai-vehicle-card', UnipolSaiVehicleCard);
+  } else {
+    const registeredVersion = registeredUnipolSaiCard.unipolsaiCardVersion;
+    if (!registeredVersion || registeredVersion !== CARD_VERSION) {
+      const versionLabel = registeredVersion
+        ? `v${registeredVersion}`
+        : 'legacy (versione sconosciuta)';
+      console.warn(
+        `[UnipolSai] unipolsai-vehicle-card ${versionLabel} è già registrata; il modulo v${CARD_VERSION} `
+        + 'non può sostituirla nella pagina corrente. Esegui un hard refresh del browser '
+        + "o forza l'arresto dell'app e rimuovi eventuali risorse Lovelace duplicate.",
+      );
+    }
   }
 
   window.customCards = window.customCards || [];
@@ -1520,8 +1556,9 @@ svg.leaflet-image-layer.leaflet-interactive path {
   }
 
   console.info(
-    `%c UNIPOLSAI-VEHICLE-CARD %c v${CARD_VERSION} `,
+    `%c UNIPOLSAI-VEHICLE-CARD %c v${CARD_VERSION} %c ${CARD_MODULE_URL} `,
     'color:#fff;background:#e31837;font-weight:bold;padding:2px 4px;',
     'color:#e31837;background:#fff;font-weight:bold;padding:2px 4px;border:1px solid #e31837;',
+    'color:inherit;background:transparent;',
   );
 })();

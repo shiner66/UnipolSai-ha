@@ -6,6 +6,20 @@ e il versioning segue [Semantic Versioning](https://semver.org/lang/it/).
 
 ---
 
+## [1.5.5] — 2026-09-30
+
+### Corretto
+- Inizializzata la vista Leaflet prima di aggiungere il layer MapLibre, usando
+  la prima posizione GPS valida disponibile. L'adapter non viene più
+  interpretato come non inizializzato e la card non passa erroneamente al
+  fallback OpenTopoMap a ogni caricamento.
+- La card ricava versione e percorsi degli asset MapLibre dall'URL del modulo
+  effettivamente caricato, evitando richieste a percorsi non ancora registrati
+  durante gli aggiornamenti; la console segnala inoltre una card legacy o di
+  versione diversa già registrata nella pagina.
+
+---
+
 ## [1.5.4] — 2026-09-30
 
 ### Modificato
